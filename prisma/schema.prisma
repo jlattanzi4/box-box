@@ -1,0 +1,153 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Auth & Users ───────────────────────────────────────────────
+
+model User {
+  id           String         @id @default(cuid())
+  name         String
+  email        String         @unique
+  passwordHash String
+  createdAt    DateTime       @default(now())
+  memberships  LeagueMember[]
+  picks        Pick[]
+  scores       Score[]
+}
+
+// ─── Leagues ────────────────────────────────────────────────────
+
+model League {
+  id         String         @id @default(cuid())
+  name       String
+  inviteCode String         @unique
+  seasonYear Int            @default(2026)
+  createdAt  DateTime       @default(now())
+  members    LeagueMember[]
+  picks      Pick[]
+  scores     Score[]
+}
+
+model LeagueMember {
+  id       String   @id @default(cuid())
+  league   League   @relation(fields: [leagueId], references: [id], onDelete: Cascade)
+  leagueId String
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId   String
+  role     String   @default("member") // "admin" or "member"
+  joinedAt DateTime @default(now())
+
+  @@unique([leagueId, userId])
+}
+
+// ─── F1 Data ────────────────────────────────────────────────────
+
+model Constructor {
+  id         String   @id @default(cuid())
+  jolpicaId  String   @unique // e.g. "red_bull"
+  name       String   // e.g. "Red Bull"
+  drivers    Driver[]
+  picks      Pick[]
+  results    RaceResult[]
+}
+
+model Driver {
+  id            String      @id @default(cuid())
+  jolpicaId     String      @unique // e.g. "max_verstappen"
+  code          String      // e.g. "VER"
+  firstName     String
+  lastName      String
+  number        Int
+  constructor   Constructor @relation(fields: [constructorId], references: [id])
+  constructorId String
+  picks         Pick[]
+  results       RaceResult[]
+}
+
+model Race {
+  id           String             @id @default(cuid())
+  seasonYear   Int
+  round        Int
+  name         String             // e.g. "Australian Grand Prix"
+  circuitName  String
+  country      String
+  raceDate     DateTime
+  pickDeadline DateTime           // same as raceDate (locks at race start)
+  status       String             @default("upcoming") // "upcoming" | "completed"
+  picks        Pick[]
+  results      RaceResult[]
+  events       RaceControlEvent[]
+  scores       Score[]
+
+  @@unique([seasonYear, round])
+}
+
+// ─── Picks ──────────────────────────────────────────────────────
+
+model Pick {
+  id            String       @id @default(cuid())
+  league        League       @relation(fields: [leagueId], references: [id], onDelete: Cascade)
+  leagueId      String
+  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId        String
+  race          Race         @relation(fields: [raceId], references: [id])
+  raceId        String
+  pickType      String       // "driver_constructor" | "race_control"
+  driver        Driver?      @relation(fields: [driverId], references: [id])
+  driverId      String?
+  constructor   Constructor? @relation(fields: [constructorId], references: [id])
+  constructorId String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  score         Score?
+
+  @@unique([leagueId, userId, raceId])
+}
+
+// ─── Results & Scoring ──────────────────────────────────────────
+
+model RaceResult {
+  id            String      @id @default(cuid())
+  race          Race        @relation(fields: [raceId], references: [id])
+  raceId        String
+  driver        Driver      @relation(fields: [driverId], references: [id])
+  driverId      String
+  constructor   Constructor @relation(fields: [constructorId], references: [id])
+  constructorId String
+  position      Int?        // null if DNF
+  points        Float       @default(0)
+  status        String      // "Finished", "Retired", "Disqualified", etc.
+  fastestLap    Boolean     @default(false)
+
+  @@unique([raceId, driverId])
+}
+
+model RaceControlEvent {
+  id          String @id @default(cuid())
+  race        Race   @relation(fields: [raceId], references: [id])
+  raceId      String
+  eventType   String // "red_flag" | "safety_car" | "vsc" | "dnf" | "wet" | "penalty"
+  description String @default("")
+  source      String @default("api") // "api" | "manual"
+}
+
+model Score {
+  id                 String @id @default(cuid())
+  pick               Pick   @relation(fields: [pickId], references: [id], onDelete: Cascade)
+  pickId             String @unique
+  race               Race   @relation(fields: [raceId], references: [id])
+  raceId             String
+  user               User   @relation(fields: [userId], references: [id])
+  userId             String
+  league             League @relation(fields: [leagueId], references: [id])
+  leagueId           String
+  driverPoints       Float  @default(0)
+  constructorPoints  Float  @default(0)
+  raceControlPoints  Float  @default(0)
+  totalPoints        Float  @default(0)
+}
