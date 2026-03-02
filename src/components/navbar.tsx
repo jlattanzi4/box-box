@@ -22,6 +22,11 @@ export function Navbar() {
         </Link>
 
         <div className="flex items-center gap-3">
+          <Link href="/how-it-works">
+            <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground">
+              How It Works
+            </Button>
+          </Link>
           {session?.user ? (
             <>
               <Link href="/dashboard">
