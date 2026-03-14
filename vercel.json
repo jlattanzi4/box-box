@@ -3,10 +3,6 @@
     {
       "path": "/api/cron/update-results",
       "schedule": "0 10 * * 1"
-    },
-    {
-      "path": "/api/cron/send-reminders",
-      "schedule": "0 12 * * 5,6"
     }
   ]
 }
