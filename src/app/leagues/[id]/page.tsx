@@ -107,6 +107,31 @@ export default async function LeaguePage({
     ? new Date() >= new Date(nextRace.pickDeadline)
     : false;
 
+  // Get all members' picks for the current race (only after deadline)
+  const allPicksForRace =
+    nextRace && deadlinePassed
+      ? (
+          await prisma.pick.findMany({
+            where: { leagueId: id, raceId: nextRace.id },
+            include: { driver: true, constructor: true, user: true },
+          })
+        ).map((p) => ({
+          userId: p.userId,
+          userName: p.user.name,
+          pickType: p.pickType,
+          pickDriver: p.driver,
+          pickConstructor: p.constructor as {
+            id: string;
+            name: string;
+            jolpicaId: string;
+          } | null,
+        }))
+      : [];
+
+  const picksByUser = new Map(
+    allPicksForRace.map((p) => [p.userId, p])
+  );
+
   const teamColor = currentPick?.pickConstructor
     ? getTeamColor(currentPick.pickConstructor.jolpicaId)
     : null;
@@ -281,6 +306,102 @@ export default async function LeaguePage({
                 </p>
               </div>
             )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* This Week's Picks — visible after deadline */}
+      {deadlinePassed && nextRace && standings.length > 0 && (
+        <Card className="border-border/50 bg-card/50">
+          <CardHeader className="pb-3">
+            <CardDescription className="text-xs uppercase tracking-wider">
+              <span className="inline-block px-2 py-0.5 rounded bg-primary/10 text-primary font-semibold">
+                Round {nextRace.round} Picks
+              </span>
+            </CardDescription>
+            <CardTitle className="text-xl font-bold">
+              This Week&apos;s Picks
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {standings.map((member) => {
+              const pick = picksByUser.get(member.userId);
+              const memberTeamColor = pick?.pickConstructor
+                ? getTeamColor(pick.pickConstructor.jolpicaId)
+                : null;
+              const isYou = member.userId === session.user!.id;
+
+              return (
+                <div
+                  key={member.userId}
+                  className={`flex items-center justify-between rounded-lg border p-3 ${
+                    isYou
+                      ? "bg-primary/5 border-primary/20"
+                      : "border-border/30"
+                  }`}
+                  style={
+                    memberTeamColor
+                      ? ({
+                          borderLeftWidth: "3px",
+                          borderLeftColor: memberTeamColor,
+                        } as React.CSSProperties)
+                      : undefined
+                  }
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span className="text-sm font-semibold truncate">
+                      {member.name}
+                      {isYou && (
+                        <Badge
+                          variant="outline"
+                          className="ml-2 text-xs border-primary/30 text-primary"
+                        >
+                          You
+                        </Badge>
+                      )}
+                    </span>
+                  </div>
+
+                  {pick ? (
+                    pick.pickType === "race_control" ? (
+                      <div className="flex items-center gap-2 shrink-0">
+                        <div className="w-7 h-7 rounded bg-primary/10 flex items-center justify-center">
+                          <span className="text-xs font-bold text-primary">
+                            RC
+                          </span>
+                        </div>
+                        <span className="text-sm font-medium">
+                          Race Control
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2 shrink-0">
+                        {memberTeamColor && (
+                          <span
+                            className="inline-block w-2 h-2 rounded-full"
+                            style={{ backgroundColor: memberTeamColor }}
+                          />
+                        )}
+                        <span
+                          className="text-sm font-mono font-bold"
+                          style={{ color: memberTeamColor ?? undefined }}
+                        >
+                          {pick.pickDriver?.code}
+                        </span>
+                        <span className="text-muted-foreground text-xs">+</span>
+                        <span className="text-sm font-medium">
+                          {pick.pickConstructor?.name}
+                        </span>
+                      </div>
+                    )
+                  ) : (
+                    <span className="text-sm text-muted-foreground italic">
+                      No pick
+                    </span>
+                  )}
+                </div>
+              );
+            })}
           </CardContent>
         </Card>
       )}
