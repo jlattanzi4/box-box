@@ -84,6 +84,41 @@ export async function getRaceCalendar(year: number) {
   return data.MRData.RaceTable.Races;
 }
 
+/** Normalise a circuit name for fuzzy comparison: lowercase, collapse punctuation/spaces. */
+function normaliseCircuit(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[-–—]/g, " ")   // hyphens/dashes → space
+    .replace(/[^a-z0-9 ]/g, "") // strip other punctuation
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Builds a map of normalised circuitName → Jolpica round number for the year.
+ * Jolpica renumbers rounds when races are cancelled, so this is the
+ * source of truth for the correct round when fetching results.
+ * Normalisation handles differences like "Circuit Gilles-Villeneuve" vs
+ * "Circuit Gilles Villeneuve", "Albert Park Circuit" vs "Albert Park Grand
+ * Prix Circuit", accent variants, etc.
+ */
+export async function getJolpicaRoundMap(year: number): Promise<Map<string, number>> {
+  const races = await getRaceCalendar(year);
+  const map = new Map<string, number>();
+  for (const race of races) {
+    map.set(normaliseCircuit(race.Circuit.circuitName), parseInt(race.round));
+  }
+  return map;
+}
+
+/** Look up the Jolpica round for a DB circuit name, returning null if not found. */
+export function lookupJolpicaRound(
+  roundMap: Map<string, number>,
+  dbCircuitName: string
+): number | null {
+  return roundMap.get(normaliseCircuit(dbCircuitName)) ?? null;
+}
+
 export async function getRaceResults(year: number, round: number) {
   const data = await fetchJolpica<RaceTable>(
     `/${year}/${round}/results.json`

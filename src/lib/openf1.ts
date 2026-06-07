@@ -109,13 +109,28 @@ export function parseRaceControlEvents(events: OpenF1RaceControl[]): ParsedRaceE
   return { redFlags, safetyCars, vscs, dnfs: details.filter(d => d.eventType === "dnf").length, wet, penalties, details };
 }
 
-export async function getSessionKeyForRound(year: number, round: number): Promise<number | null> {
+/**
+ * Finds the OpenF1 session key for a race by matching date proximity.
+ * The old approach (array index by round number) broke when races were
+ * cancelled or when sprint races added extra sessions to the list.
+ * This matches the session whose start time is closest to raceDate,
+ * within a 12-hour tolerance so sprint races the day before don't match.
+ */
+export async function getSessionKeyForRound(year: number, raceDate: Date): Promise<number | null> {
   const sessions = await getRaceSessions(year);
-  // Sessions are returned in date order; the round-th Race session corresponds to our round
-  // We match by index since OpenF1 doesn't use "round" directly
-  const raceSessions = sessions.sort(
-    (a, b) => new Date(a.date_start).getTime() - new Date(b.date_start).getTime()
-  );
-  const session = raceSessions[round - 1];
-  return session?.session_key ?? null;
+  const raceDateMs = raceDate.getTime();
+  const TOLERANCE_MS = 12 * 60 * 60 * 1000; // 12 hours
+
+  let bestMatch: OpenF1Session | null = null;
+  let bestDiff = Infinity;
+
+  for (const session of sessions) {
+    const diff = Math.abs(new Date(session.date_start).getTime() - raceDateMs);
+    if (diff < TOLERANCE_MS && diff < bestDiff) {
+      bestMatch = session;
+      bestDiff = diff;
+    }
+  }
+
+  return bestMatch?.session_key ?? null;
 }

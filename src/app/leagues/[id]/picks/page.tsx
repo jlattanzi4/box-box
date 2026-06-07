@@ -211,7 +211,7 @@ export default function PicksPage({
               {races.map((race) => (
                 <SelectItem key={race.id} value={race.id}>
                   R{race.round}: {race.name}{" "}
-                  {race.status === "completed" ? "(completed)" : ""}
+                  {race.status !== "upcoming" ? `(${race.status})` : ""}
                 </SelectItem>
               ))}
             </SelectContent>

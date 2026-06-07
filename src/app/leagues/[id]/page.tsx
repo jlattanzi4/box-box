@@ -65,13 +65,39 @@ export default async function LeaguePage({
     }))
     .sort((a, b) => b.totalPoints - a.totalPoints);
 
-  // Get next upcoming race
+  const now = new Date();
+
+  // The race members can currently make picks for: the earliest upcoming race
+  // whose deadline hasn't passed yet. Excluding deadline-passed races means a
+  // race that's stuck unprocessed can never block picks for the genuine next race.
   const nextRace = await prisma.race.findFirst({
-    where: { seasonYear: league.seasonYear, status: "upcoming" },
+    where: {
+      seasonYear: league.seasonYear,
+      status: "upcoming",
+      pickDeadline: { gt: now },
+    },
     orderBy: { round: "asc" },
   });
 
-  // Get current user's pick for the next race
+  // The most recent race whose deadline has already passed — used to show
+  // "this week's picks" during and just after a race weekend.
+  const recentRace = await prisma.race.findFirst({
+    where: {
+      seasonYear: league.seasonYear,
+      status: { not: "cancelled" },
+      pickDeadline: { lte: now },
+    },
+    orderBy: { pickDeadline: "desc" },
+  });
+
+  // Only surface recent picks within a few days of the race, so a stuck or old
+  // race doesn't keep showing its picks indefinitely.
+  const RECENT_WINDOW_MS = 4 * 24 * 60 * 60 * 1000;
+  const showRecentPicks =
+    !!recentRace &&
+    now.getTime() - new Date(recentRace.pickDeadline).getTime() < RECENT_WINDOW_MS;
+
+  // Get current user's pick for the upcoming race
   const currentPickRaw = nextRace
     ? await prisma.pick.findUnique({
         where: {
@@ -99,20 +125,17 @@ export default async function LeaguePage({
     where: { seasonYear: league.seasonYear, status: "completed" },
   });
 
+  // Total excludes cancelled races so the "X/Y completed" counter can reach 100%
   const totalRaces = await prisma.race.count({
-    where: { seasonYear: league.seasonYear },
+    where: { seasonYear: league.seasonYear, status: { not: "cancelled" } },
   });
 
-  const deadlinePassed = nextRace
-    ? new Date() >= new Date(nextRace.pickDeadline)
-    : false;
-
-  // Get all members' picks for the current race (only after deadline)
+  // Get all members' picks for the most recent race (the "this week's picks" view)
   const allPicksForRace =
-    nextRace && deadlinePassed
+    recentRace && showRecentPicks
       ? (
           await prisma.pick.findMany({
-            where: { leagueId: id, raceId: nextRace.id },
+            where: { leagueId: id, raceId: recentRace.id },
             include: { driver: true, constructor: true, user: true },
           })
         ).map((p) => ({
@@ -208,13 +231,11 @@ export default async function LeaguePage({
                   })}
                 </span>
               </div>
-              {!deadlinePassed && (
-                <Link href={`/leagues/${id}/picks?raceId=${nextRace.id}`}>
-                  <Button size="sm" className="font-semibold">
-                    {currentPick ? "Change Pick" : "Pick Now"}
-                  </Button>
-                </Link>
-              )}
+              <Link href={`/leagues/${id}/picks?raceId=${nextRace.id}`}>
+                <Button size="sm" className="font-semibold">
+                  {currentPick ? "Change Pick" : "Pick Now"}
+                </Button>
+              </Link>
             </div>
 
             {/* Current Pick Display */}
@@ -287,7 +308,7 @@ export default async function LeaguePage({
                   </div>
                 )}
               </div>
-            ) : !deadlinePassed ? (
+            ) : (
               <div className="rounded-xl border border-dashed border-border/50 p-4 text-center">
                 <p className="text-sm text-muted-foreground">
                   You haven&apos;t made a pick yet.{" "}
@@ -299,24 +320,18 @@ export default async function LeaguePage({
                   </Link>
                 </p>
               </div>
-            ) : (
-              <div className="rounded-xl border border-destructive/20 bg-destructive/5 p-4 text-center">
-                <p className="text-sm text-destructive">
-                  Picks are locked. The deadline has passed.
-                </p>
-              </div>
             )}
           </CardContent>
         </Card>
       )}
 
-      {/* This Week's Picks — visible after deadline */}
-      {deadlinePassed && nextRace && standings.length > 0 && (
+      {/* This Week's Picks — visible during/just after the most recent race */}
+      {showRecentPicks && recentRace && standings.length > 0 && (
         <Card className="border-border/50 bg-card/50">
           <CardHeader className="pb-3">
             <CardDescription className="text-xs uppercase tracking-wider">
               <span className="inline-block px-2 py-0.5 rounded bg-primary/10 text-primary font-semibold">
-                Round {nextRace.round} Picks
+                Round {recentRace.round} Picks
               </span>
             </CardDescription>
             <CardTitle className="text-xl font-bold">
