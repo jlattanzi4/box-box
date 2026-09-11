@@ -2,480 +2,171 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { getTeamColor } from "@/lib/team-colors";
+import { getLeagueStandings } from "@/lib/standings";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
+import { PageHeader } from "@/components/page-header";
+import { LeagueNav } from "@/components/league-nav";
+import { CopyCode } from "@/components/copy-code";
+import { Countdown } from "@/components/countdown";
+import { LocalTime } from "@/components/local-time";
+import { PickChip } from "@/components/pick-chip";
+import { TimingTower } from "@/components/timing-tower";
 
-export default async function LeaguePage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
+export default async function LeaguePage({ params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
+  const userId = session.user.id;
 
   const { id } = await params;
 
   const league = await prisma.league.findUnique({
     where: { id },
-    include: {
-      members: {
-        include: { user: { select: { id: true, name: true } } },
-      },
-    },
+    include: { members: { include: { user: { select: { id: true, name: true } } } } },
   });
-
   if (!league) redirect("/dashboard");
-
-  const isMember = league.members.some((m) => m.userId === session.user!.id);
-  if (!isMember) redirect("/dashboard");
-
-  // Get standings: total points per member
-  const scores = await prisma.score.groupBy({
-    by: ["userId"],
-    where: { leagueId: id },
-    _sum: { totalPoints: true },
-  });
-
-  const scoreMap = new Map(
-    scores.map((s) => [s.userId, s._sum.totalPoints ?? 0])
-  );
-
-  const standings = league.members
-    .map((m) => ({
-      userId: m.userId,
-      name: m.user.name,
-      role: m.role,
-      totalPoints: scoreMap.get(m.userId) ?? 0,
-    }))
-    .sort((a, b) => b.totalPoints - a.totalPoints);
+  if (!league.members.some((m) => m.userId === userId)) redirect("/dashboard");
 
   const now = new Date();
 
-  // The race members can currently make picks for: the earliest upcoming race
-  // whose deadline hasn't passed yet. Excluding deadline-passed races means a
-  // race that's stuck unprocessed can never block picks for the genuine next race.
-  const nextRace = await prisma.race.findFirst({
-    where: {
-      seasonYear: league.seasonYear,
-      status: "upcoming",
-      pickDeadline: { gt: now },
-    },
-    orderBy: { round: "asc" },
-  });
+  const [standings, nextRace, recentRace, completedRaces, totalRaces] = await Promise.all([
+    getLeagueStandings(id),
+    prisma.race.findFirst({
+      where: { seasonYear: league.seasonYear, status: "upcoming", pickDeadline: { gt: now } },
+      orderBy: { round: "asc" },
+    }),
+    prisma.race.findFirst({
+      where: { seasonYear: league.seasonYear, status: { not: "cancelled" }, pickDeadline: { lte: now } },
+      orderBy: { pickDeadline: "desc" },
+    }),
+    prisma.race.count({ where: { seasonYear: league.seasonYear, status: "completed" } }),
+    prisma.race.count({ where: { seasonYear: league.seasonYear, status: { not: "cancelled" } } }),
+  ]);
 
-  // The most recent race whose deadline has already passed — used to show
-  // "this week's picks" during and just after a race weekend.
-  const recentRace = await prisma.race.findFirst({
-    where: {
-      seasonYear: league.seasonYear,
-      status: { not: "cancelled" },
-      pickDeadline: { lte: now },
-    },
-    orderBy: { pickDeadline: "desc" },
-  });
-
-  // Only surface recent picks within a few days of the race, so a stuck or old
-  // race doesn't keep showing its picks indefinitely.
-  const RECENT_WINDOW_MS = 4 * 24 * 60 * 60 * 1000;
-  const showRecentPicks =
-    !!recentRace &&
-    now.getTime() - new Date(recentRace.pickDeadline).getTime() < RECENT_WINDOW_MS;
-
-  // Get current user's pick for the upcoming race
-  const currentPickRaw = nextRace
+  const currentPick = nextRace
     ? await prisma.pick.findUnique({
-        where: {
-          leagueId_userId_raceId: {
-            leagueId: id,
-            userId: session.user!.id,
-            raceId: nextRace.id,
-          },
-        },
+        where: { leagueId_userId_raceId: { leagueId: id, userId, raceId: nextRace.id } },
         include: { driver: true, constructor: true },
       })
     : null;
 
-  // Extract constructor separately to avoid JS reserved word conflict
-  const currentPick = currentPickRaw
-    ? {
-        ...currentPickRaw,
-        pickDriver: currentPickRaw.driver,
-        pickConstructor: currentPickRaw.constructor as { id: string; name: string; jolpicaId: string; code: string } | null,
-      }
-    : null;
+  // Show the group's picks for the most recent race for a few days around it.
+  const RECENT_WINDOW_MS = 4 * 24 * 60 * 60 * 1000;
+  const showRecent =
+    !!recentRace && now.getTime() - recentRace.pickDeadline.getTime() < RECENT_WINDOW_MS;
 
-  // Get completed races count
-  const completedRaces = await prisma.race.count({
-    where: { seasonYear: league.seasonYear, status: "completed" },
-  });
-
-  // Total excludes cancelled races so the "X/Y completed" counter can reach 100%
-  const totalRaces = await prisma.race.count({
-    where: { seasonYear: league.seasonYear, status: { not: "cancelled" } },
-  });
-
-  // Get all members' picks for the most recent race (the "this week's picks" view)
-  const allPicksForRace =
-    recentRace && showRecentPicks
-      ? (
-          await prisma.pick.findMany({
-            where: { leagueId: id, raceId: recentRace.id },
-            include: { driver: true, constructor: true, user: true },
-          })
-        ).map((p) => ({
-          userId: p.userId,
-          userName: p.user.name,
-          pickType: p.pickType,
-          pickDriver: p.driver,
-          pickConstructor: p.constructor as {
-            id: string;
-            name: string;
-            jolpicaId: string;
-          } | null,
-        }))
-      : [];
-
-  const picksByUser = new Map(
-    allPicksForRace.map((p) => [p.userId, p])
-  );
-
-  const teamColor = currentPick?.pickConstructor
-    ? getTeamColor(currentPick.pickConstructor.jolpicaId)
-    : null;
-
-  const positionColors = ["#FFD700", "#C0C0C0", "#CD7F32"];
+  const recentPicks = showRecent && recentRace
+    ? await prisma.pick.findMany({
+        where: { leagueId: id, raceId: recentRace.id },
+        include: { driver: true, constructor: true, score: true },
+      })
+    : [];
+  const recentByUser = new Map(recentPicks.map((p) => [p.userId, p]));
+  const recentScored = recentRace?.status === "completed";
 
   return (
-    <div className="space-y-6 stagger-children">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-black tracking-tight">{league.name}</h1>
-          <p className="text-muted-foreground mt-1">
-            {league.seasonYear} Season &middot; {completedRaces}/{totalRaces}{" "}
-            races completed
-          </p>
-        </div>
-        <div className="flex gap-2 flex-wrap">
-          <Link href={`/leagues/${id}/picks`}>
-            <Button className="font-semibold">Make Picks</Button>
-          </Link>
-          <Link href={`/leagues/${id}/results`}>
-            <Button variant="outline" className="border-border/50">Results</Button>
-          </Link>
-          <Link href={`/leagues/${id}/history`}>
-            <Button variant="outline" className="border-border/50">History</Button>
-          </Link>
-        </div>
-      </div>
+    <div className="space-y-6">
+      <PageHeader
+        eyebrow={`${league.seasonYear} season · ${completedRaces} of ${totalRaces} races scored`}
+        title={league.name}
+        actions={<CopyCode code={league.inviteCode} />}
+      />
 
-      {/* Invite Code */}
-      <Card className="border-border/50 bg-card/50 overflow-hidden relative">
-        <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-[#FF8700] via-[#E80020] via-[#3671C6] via-[#27F4D2] to-[#FF87BC]" />
-        <CardContent className="flex items-center justify-between py-4">
-          <div>
-            <p className="text-xs text-muted-foreground uppercase tracking-wider mb-1">
-              Invite Code
-            </p>
-            <code className="text-2xl font-mono font-black tracking-[0.2em]">
-              {league.inviteCode}
-            </code>
+      <LeagueNav leagueId={id} />
+
+      {/* Pit board: the next race and your pick for it */}
+      {nextRace ? (
+        <section className="pit-board fade-up" aria-labelledby="next-race">
+          <div className="kerb" />
+          <div className="pit-board-row">
+            <span className="t-eyebrow">Round {nextRace.round}</span>
+            <span id="next-race" className="pit-board-value text-3xl sm:text-5xl text-right">
+              {nextRace.name.replace(" Grand Prix", " GP")}
+            </span>
           </div>
-          <Badge variant="secondary" className="text-sm">
-            {league.members.length} member
-            {league.members.length !== 1 ? "s" : ""}
-          </Badge>
-        </CardContent>
-      </Card>
-
-      {/* Next Race + Current Pick */}
-      {nextRace && (
-        <Card className="border-border/50 bg-card/50 overflow-hidden">
-          <CardHeader className="pb-3">
-            <CardDescription className="text-xs uppercase tracking-wider">
-              <span className="inline-block px-2 py-0.5 rounded bg-primary/10 text-primary font-semibold">
-                Next Race &middot; Round {nextRace.round}
-              </span>
-            </CardDescription>
-            <CardTitle className="text-xl font-bold">
-              {nextRace.name}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="text-sm text-muted-foreground">
-                {nextRace.circuitName} &middot; {nextRace.country}
-                <br />
-                <span className="text-foreground/70">
-                  {new Date(nextRace.raceDate).toLocaleDateString("en-US", {
-                    weekday: "long",
-                    year: "numeric",
-                    month: "long",
-                    day: "numeric",
-                  })}
-                </span>
-              </div>
-              <Link href={`/leagues/${id}/picks?raceId=${nextRace.id}`}>
-                <Button size="sm" className="font-semibold">
-                  {currentPick ? "Change Pick" : "Pick Now"}
-                </Button>
-              </Link>
-            </div>
-
-            {/* Current Pick Display */}
+          <div className="pit-board-row">
+            <span className="t-eyebrow">Lights out</span>
+            <span className="text-right">
+              <Countdown to={nextRace.raceDate.toISOString()} className="pit-board-value text-3xl sm:text-5xl t-num" />
+              <LocalTime iso={nextRace.raceDate.toISOString()} className="block text-xs text-chalk-dim mt-1" />
+            </span>
+          </div>
+          <div className="pit-board-row items-center">
+            <span className="t-eyebrow">Your pick</span>
             {currentPick ? (
-              <div
-                className="rounded-xl border p-4 team-border-l"
-                style={{
-                  "--team-color": teamColor,
-                  borderColor: `color-mix(in oklch, ${teamColor} 30%, transparent)`,
-                  backgroundColor: `color-mix(in oklch, ${teamColor} 5%, transparent)`,
-                  boxShadow: `0 0 25px -8px ${teamColor}`,
-                } as React.CSSProperties}
-              >
-                <p className="text-xs text-muted-foreground uppercase tracking-wider mb-2">
-                  Your Pick
-                </p>
-                {currentPick.pickType === "race_control" ? (
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                      <span className="text-sm font-bold text-primary">RC</span>
-                    </div>
-                    <div>
-                      <p className="font-bold">Race Control</p>
-                      <p className="text-xs text-muted-foreground">
-                        Scoring from race events
-                      </p>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-4">
-                    <div className="flex items-center gap-3">
-                      <div
-                        className="w-10 h-10 rounded-lg flex items-center justify-center border"
-                        style={{
-                          borderColor: `color-mix(in oklch, ${teamColor} 40%, transparent)`,
-                          backgroundColor: `color-mix(in oklch, ${teamColor} 10%, transparent)`,
-                        }}
-                      >
-                        <span className="text-sm font-bold font-mono" style={{ color: teamColor ?? undefined }}>
-                          {currentPick.pickDriver?.code}
-                        </span>
-                      </div>
-                      <div>
-                        <p className="font-bold text-sm">
-                          {currentPick.pickDriver?.firstName} {currentPick.pickDriver?.lastName}
-                        </p>
-                        <p className="text-xs text-muted-foreground">Driver</p>
-                      </div>
-                    </div>
-                    <span className="text-muted-foreground font-bold">+</span>
-                    <div className="flex items-center gap-3">
-                      <div
-                        className="w-10 h-10 rounded-lg flex items-center justify-center border"
-                        style={{
-                          borderColor: `color-mix(in oklch, ${teamColor} 40%, transparent)`,
-                          backgroundColor: `color-mix(in oklch, ${teamColor} 10%, transparent)`,
-                        }}
-                      >
-                        <span className="text-xs font-bold" style={{ color: teamColor ?? undefined }}>
-                          {currentPick.pickConstructor?.name?.substring(0, 3).toUpperCase()}
-                        </span>
-                      </div>
-                      <div>
-                        <p className="font-bold text-sm">
-                          {currentPick.pickConstructor?.name}
-                        </p>
-                        <p className="text-xs text-muted-foreground">Constructor</p>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
+              <PickChip pick={currentPick} size="lg" showName />
             ) : (
-              <div className="rounded-xl border border-dashed border-border/50 p-4 text-center">
-                <p className="text-sm text-muted-foreground">
-                  You haven&apos;t made a pick yet.{" "}
-                  <Link
-                    href={`/leagues/${id}/picks?raceId=${nextRace.id}`}
-                    className="text-primary hover:underline font-medium"
-                  >
-                    Make your pick
-                  </Link>
-                </p>
-              </div>
+              <span className="t-code text-xl text-kerb blink">Not picked</span>
             )}
-          </CardContent>
-        </Card>
+          </div>
+          <div className="px-5 py-4 border-t border-asphalt-700 flex items-center justify-between gap-4">
+            <span className="text-xs text-chalk-dim">
+              {nextRace.circuitName} · {nextRace.country}
+            </span>
+            <Button asChild variant={currentPick ? "outline" : "board"}>
+              <Link href={`/leagues/${id}/picks?raceId=${nextRace.id}`}>
+                {currentPick ? "Change pick" : "Pick now"}
+              </Link>
+            </Button>
+          </div>
+        </section>
+      ) : (
+        <section className="pit-board fade-up">
+          <div className="kerb" />
+          <div className="pit-board-row">
+            <span className="t-eyebrow">Season</span>
+            <span className="pit-board-value text-3xl sm:text-4xl">Chequered flag</span>
+          </div>
+        </section>
       )}
 
-      {/* This Week's Picks — visible during/just after the most recent race */}
-      {showRecentPicks && recentRace && standings.length > 0 && (
-        <Card className="border-border/50 bg-card/50">
-          <CardHeader className="pb-3">
-            <CardDescription className="text-xs uppercase tracking-wider">
-              <span className="inline-block px-2 py-0.5 rounded bg-primary/10 text-primary font-semibold">
-                Round {recentRace.round} Picks
-              </span>
-            </CardDescription>
-            <CardTitle className="text-xl font-bold">
-              This Week&apos;s Picks
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {standings.map((member) => {
-              const pick = picksByUser.get(member.userId);
-              const memberTeamColor = pick?.pickConstructor
-                ? getTeamColor(pick.pickConstructor.jolpicaId)
-                : null;
-              const isYou = member.userId === session.user!.id;
-
+      {/* The grid's picks for the race that just happened */}
+      {showRecent && recentRace && (
+        <section className="panel p-4 sm:p-5 fade-up" aria-labelledby="recent-picks">
+          <div className="flex items-baseline justify-between mb-3">
+            <h2 id="recent-picks" className="t-code text-xl text-chalk">
+              Round {recentRace.round} · {recentRace.name.replace(" Grand Prix", " GP")}
+            </h2>
+            <span className="t-eyebrow">{recentScored ? "Scored" : "Awaiting results"}</span>
+          </div>
+          <ul className="divide-y divide-asphalt-700">
+            {standings.rows.map((m) => {
+              const pick = recentByUser.get(m.userId);
               return (
-                <div
-                  key={member.userId}
-                  className={`flex items-center justify-between rounded-lg border p-3 ${
-                    isYou
-                      ? "bg-primary/5 border-primary/20"
-                      : "border-border/30"
-                  }`}
-                  style={
-                    memberTeamColor
-                      ? ({
-                          borderLeftWidth: "3px",
-                          borderLeftColor: memberTeamColor,
-                        } as React.CSSProperties)
-                      : undefined
-                  }
-                >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <span className="text-sm font-semibold truncate">
-                      {member.name}
-                      {isYou && (
-                        <Badge
-                          variant="outline"
-                          className="ml-2 text-xs border-primary/30 text-primary"
-                        >
-                          You
-                        </Badge>
-                      )}
-                    </span>
-                  </div>
-
-                  {pick ? (
-                    pick.pickType === "race_control" ? (
-                      <div className="flex items-center gap-2 shrink-0">
-                        <div className="w-7 h-7 rounded bg-primary/10 flex items-center justify-center">
-                          <span className="text-xs font-bold text-primary">
-                            RC
-                          </span>
-                        </div>
-                        <span className="text-sm font-medium">
-                          Race Control
-                        </span>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-2 shrink-0">
-                        {memberTeamColor && (
-                          <span
-                            className="inline-block w-2 h-2 rounded-full"
-                            style={{ backgroundColor: memberTeamColor }}
-                          />
-                        )}
-                        <span
-                          className="text-sm font-mono font-bold"
-                          style={{ color: memberTeamColor ?? undefined }}
-                        >
-                          {pick.pickDriver?.code}
-                        </span>
-                        <span className="text-muted-foreground text-xs">+</span>
-                        <span className="text-sm font-medium">
-                          {pick.pickConstructor?.name}
-                        </span>
-                      </div>
-                    )
-                  ) : (
-                    <span className="text-sm text-muted-foreground italic">
-                      No pick
-                    </span>
-                  )}
-                </div>
+                <li key={m.userId} className="flex items-center justify-between gap-3 py-2.5">
+                  <span className="flex items-center gap-3 min-w-0">
+                    <span className="t-code text-base text-chalk w-10">{m.code}</span>
+                    <span className="text-sm text-chalk-dim truncate">{m.name}</span>
+                  </span>
+                  <span className="flex items-center gap-4 shrink-0">
+                    <PickChip pick={pick} size="sm" />
+                    {recentScored && pick?.score && (
+                      <span className="t-num text-sm font-bold text-chalk w-12 text-right">
+                        {pick.score.totalPoints}
+                        <span className="text-xs font-normal text-chalk-dim"> pts</span>
+                      </span>
+                    )}
+                  </span>
+                </li>
               );
             })}
-          </CardContent>
-        </Card>
+          </ul>
+        </section>
       )}
 
       {/* Standings */}
-      <Card className="border-border/50 bg-card/50">
-        <CardHeader>
-          <CardTitle className="text-xl font-bold">Standings</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow className="border-border/30">
-                <TableHead className="w-12">#</TableHead>
-                <TableHead>Player</TableHead>
-                <TableHead className="text-right">Points</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {standings.map((s, i) => (
-                <TableRow
-                  key={s.userId}
-                  className={`border-border/20 ${i === 0 && s.totalPoints > 0 ? "bg-primary/5" : ""}`}
-                >
-                  <TableCell>
-                    {i < 3 && s.totalPoints > 0 ? (
-                      <span
-                        className="inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-black"
-                        style={{
-                          backgroundColor: `color-mix(in oklch, ${positionColors[i]} 15%, transparent)`,
-                          color: positionColors[i],
-                        }}
-                      >
-                        {i + 1}
-                      </span>
-                    ) : (
-                      <span className="font-black text-lg text-muted-foreground">
-                        {i + 1}
-                      </span>
-                    )}
-                  </TableCell>
-                  <TableCell className="font-semibold">
-                    {s.name}
-                    {s.userId === session.user!.id && (
-                      <Badge variant="outline" className="ml-2 text-xs border-primary/30 text-primary">
-                        You
-                      </Badge>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-right font-mono font-bold text-lg tabular-nums">
-                    {s.totalPoints}
-                    <span className="text-xs text-muted-foreground ml-1 font-normal">pts</span>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+      <section className="space-y-3 fade-up" aria-labelledby="standings">
+        <div className="flex items-baseline justify-between">
+          <h2 id="standings" className="t-code text-xl text-chalk">Standings</h2>
+          <Link href={`/leagues/${id}/results`} className="t-eyebrow hover:text-chalk">
+            Race by race →
+          </Link>
+        </div>
+        <TimingTower
+          rows={standings.rows}
+          currentUserId={userId}
+          lastRoundLabel={standings.lastRace ? `R${standings.lastRace.round}` : null}
+        />
+      </section>
     </div>
   );
 }

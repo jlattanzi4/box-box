@@ -1,230 +1,163 @@
 import { redirect } from "next/navigation";
-import Link from "next/link";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { getTeamColor } from "@/lib/team-colors";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
+import { playerCodes } from "@/lib/player-code";
+import { PageHeader } from "@/components/page-header";
+import { LeagueNav } from "@/components/league-nav";
+import { PickChip } from "@/components/pick-chip";
 import { RACE_CONTROL_POINTS } from "@/types";
 
-const EVENT_COLORS: Record<string, string> = {
-  red_flag: "bg-red-500/15 text-red-400 border-red-500/30",
-  safety_car: "bg-yellow-500/15 text-yellow-400 border-yellow-500/30",
-  vsc: "bg-amber-500/15 text-amber-400 border-amber-500/30",
-  dnf: "bg-orange-500/15 text-orange-400 border-orange-500/30",
-  wet: "bg-blue-500/15 text-blue-400 border-blue-500/30",
-  penalty: "bg-zinc-500/15 text-zinc-400 border-zinc-500/30",
+const EVENT_STYLE: Record<string, { label: string; color: string }> = {
+  red_flag: { label: "Red flag", color: "var(--kerb-red)" },
+  safety_car: { label: "Safety car", color: "var(--flag-yellow)" },
+  vsc: { label: "VSC", color: "#f0b429" },
+  wet: { label: "Wet", color: "var(--wet-blue)" },
+  dnf: { label: "DNF", color: "#ff7a3d" },
+  penalty: { label: "Penalty", color: "var(--chalk-dim)" },
 };
 
-export default async function ResultsPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
+export default async function ResultsPage({ params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
+  const userId = session.user.id;
 
   const { id: leagueId } = await params;
 
-  const member = await prisma.leagueMember.findUnique({
-    where: { leagueId_userId: { leagueId, userId: session.user!.id } },
-  });
-  if (!member) redirect("/dashboard");
-
   const league = await prisma.league.findUnique({
     where: { id: leagueId },
-    include: {
-      members: {
-        include: { user: { select: { id: true, name: true } } },
-      },
-    },
+    include: { members: { include: { user: { select: { id: true, name: true } } } } },
   });
-  if (!league) redirect("/dashboard");
+  if (!league || !league.members.some((m) => m.userId === userId)) redirect("/dashboard");
 
-  const completedRaces = await prisma.race.findMany({
-    where: { seasonYear: league.seasonYear, status: "completed" },
-    orderBy: { round: "desc" },
-    include: {
-      events: true,
-    },
-  });
+  const codes = playerCodes(league.members.map((m) => ({ id: m.userId, name: m.user.name })));
 
-  const scores = await prisma.score.findMany({
-    where: { leagueId },
-    include: {
-      pick: {
-        include: { driver: true, constructor: true },
+  const [races, scores] = await Promise.all([
+    prisma.race.findMany({
+      where: { seasonYear: league.seasonYear, status: "completed" },
+      orderBy: { round: "desc" },
+      include: { events: true },
+    }),
+    prisma.score.findMany({
+      where: { leagueId },
+      include: {
+        pick: { include: { driver: true, constructor: true } },
+        user: { select: { id: true, name: true } },
       },
-      user: { select: { id: true, name: true } },
-      race: true,
-    },
-    orderBy: { race: { round: "desc" } },
-  });
+    }),
+  ]);
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-black tracking-tight">Race Results</h1>
-        <Link href={`/leagues/${leagueId}`}>
-          <Button variant="outline" className="border-border/50">
-            Back to League
-          </Button>
-        </Link>
-      </div>
+      <PageHeader eyebrow={league.name} title="Results" />
+      <LeagueNav leagueId={leagueId} />
 
-      {completedRaces.length === 0 ? (
-        <Card className="border-border/50 bg-card/50">
-          <CardContent className="py-16 text-center">
-            <div className="w-14 h-14 rounded-xl bg-muted/50 flex items-center justify-center mx-auto mb-4">
-              <span className="text-xl font-black text-muted-foreground">?</span>
-            </div>
-            <p className="text-muted-foreground">
-              No races have been completed yet. Results will appear here after
-              each race.
-            </p>
-          </CardContent>
-        </Card>
+      {races.length === 0 ? (
+        <div className="pit-board fade-up">
+          <div className="pit-board-row">
+            <span className="t-eyebrow">Season</span>
+            <span className="pit-board-value text-3xl">No results yet</span>
+          </div>
+          <p className="px-5 py-4 text-sm text-chalk-dim border-t border-asphalt-700">
+            Scores land the morning after each race.
+          </p>
+        </div>
       ) : (
-        <div className="space-y-6 stagger-children">
-          {completedRaces.map((race) => {
-            const raceScores = scores
+        <div className="space-y-5 stagger">
+          {races.map((race) => {
+            const rows = scores
               .filter((s) => s.raceId === race.id)
-              .sort((a, b) => b.totalPoints - a.totalPoints);
+              .sort((a, b) => b.totalPoints - a.totalPoints || a.user.name.localeCompare(b.user.name));
+            const top = rows[0]?.totalPoints ?? 0;
 
-            // Get winner's constructor for the top accent
-            const winnerPick = raceScores[0]?.pick;
-            const winnerConstructor = winnerPick?.constructor as { jolpicaId?: string } | null;
-            const topColor = winnerConstructor?.jolpicaId
-              ? getTeamColor(winnerConstructor.jolpicaId)
-              : null;
+            // Tally events: "3 × DNF" reads better than three chips.
+            const tally = new Map<string, number>();
+            for (const e of race.events) tally.set(e.eventType, (tally.get(e.eventType) ?? 0) + 1);
+            const rcTotal = [...tally.entries()].reduce(
+              (sum, [type, n]) => sum + n * (RACE_CONTROL_POINTS[type as keyof typeof RACE_CONTROL_POINTS] ?? 0),
+              0
+            );
 
             return (
-              <Card key={race.id} className="border-border/50 bg-card/50 overflow-hidden">
-                {topColor && (
-                  <div className="h-[2px]" style={{ backgroundColor: topColor }} />
-                )}
-                <CardHeader>
-                  <CardDescription className="text-xs uppercase tracking-wider">
-                    Round {race.round}
-                  </CardDescription>
-                  <CardTitle className="text-xl font-bold">{race.name}</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {race.events.length > 0 && (
-                    <div className="mb-4 flex flex-wrap gap-2">
-                      {race.events.map((e, i) => (
-                        <Badge
-                          key={i}
-                          variant="outline"
-                          className={`text-xs border ${EVENT_COLORS[e.eventType] ?? "bg-muted/50 text-muted-foreground"}`}
+              <section key={race.id} className="pit-board" aria-labelledby={`race-${race.id}`}>
+                <div className="flex items-baseline justify-between gap-4 px-4 sm:px-5 py-4">
+                  <h2 id={`race-${race.id}`} className="min-w-0">
+                    <span className="t-eyebrow block">Round {race.round}</span>
+                    <span className="t-display text-3xl sm:text-4xl text-chalk">
+                      {race.name.replace(" Grand Prix", " GP")}
+                    </span>
+                  </h2>
+                  <span className="text-right shrink-0">
+                    <span className="t-eyebrow block">Race Control</span>
+                    <span className="pit-board-value text-2xl t-num">{rcTotal} pts</span>
+                  </span>
+                </div>
+
+                {tally.size > 0 && (
+                  <ul className="flex flex-wrap gap-1.5 px-4 sm:px-5 pb-4">
+                    {[...tally.entries()].map(([type, n]) => {
+                      const style = EVENT_STYLE[type] ?? { label: type, color: "var(--chalk-dim)" };
+                      return (
+                        <li
+                          key={type}
+                          className="inline-flex items-center gap-1.5 rounded border border-asphalt-600 px-2 py-0.5 text-xs"
                         >
-                          {e.eventType.replace("_", " ")} (+
-                          {RACE_CONTROL_POINTS[
-                            e.eventType as keyof typeof RACE_CONTROL_POINTS
-                          ] ?? 0}
-                          )
-                        </Badge>
-                      ))}
-                    </div>
-                  )}
+                          <span className="size-2 rounded-sm" style={{ backgroundColor: style.color }} />
+                          {n > 1 && <span className="t-num text-chalk-dim">{n}×</span>}
+                          {style.label}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
 
-                  <Table>
-                    <TableHeader>
-                      <TableRow className="border-border/30">
-                        <TableHead>Player</TableHead>
-                        <TableHead>Pick</TableHead>
-                        <TableHead className="text-right">Driver</TableHead>
-                        <TableHead className="text-right">Constructor</TableHead>
-                        <TableHead className="text-right">RC</TableHead>
-                        <TableHead className="text-right font-bold">Total</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {raceScores.map((s, i) => {
-                        const pickConstructor = s.pick.constructor as { jolpicaId?: string; name?: string } | null;
-                        const teamCol = pickConstructor?.jolpicaId
-                          ? getTeamColor(pickConstructor.jolpicaId)
-                          : null;
-
-                        return (
-                          <TableRow
-                            key={s.id}
-                            className={`border-border/20 ${i === 0 ? "bg-primary/5" : ""}`}
-                          >
-                            <TableCell className="font-semibold">
-                              {s.user.name}
-                              {s.userId === session.user!.id && (
-                                <Badge
-                                  variant="outline"
-                                  className="ml-2 text-xs border-primary/30 text-primary"
-                                >
-                                  You
-                                </Badge>
-                              )}
-                            </TableCell>
-                            <TableCell>
-                              {s.pick.pickType === "race_control" ? (
-                                <Badge className="bg-primary/10 text-primary border-primary/20">
-                                  Race Control
-                                </Badge>
-                              ) : (
-                                <span className="text-sm flex items-center gap-1.5">
-                                  {teamCol && (
-                                    <span
-                                      className="inline-block w-2 h-2 rounded-full shrink-0"
-                                      style={{ backgroundColor: teamCol }}
-                                    />
-                                  )}
-                                  {s.pick.driver?.code ?? "?"} +{" "}
-                                  {pickConstructor?.name ?? "?"}
-                                </span>
-                              )}
-                            </TableCell>
-                            <TableCell className="text-right font-mono tabular-nums">
-                              {s.driverPoints}
-                            </TableCell>
-                            <TableCell className="text-right font-mono tabular-nums">
-                              {s.constructorPoints}
-                            </TableCell>
-                            <TableCell className="text-right font-mono tabular-nums">
-                              {s.raceControlPoints}
-                            </TableCell>
-                            <TableCell className="text-right font-mono font-bold text-lg tabular-nums">
-                              {s.totalPoints}
-                              <span className="text-xs text-muted-foreground ml-0.5 font-normal">pts</span>
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
-                      {raceScores.length === 0 && (
-                        <TableRow>
-                          <TableCell
-                            colSpan={6}
-                            className="text-center text-muted-foreground py-8"
-                          >
-                            No picks were made for this race.
-                          </TableCell>
-                        </TableRow>
-                      )}
-                    </TableBody>
-                  </Table>
-                </CardContent>
-              </Card>
+                {rows.length === 0 ? (
+                  <p className="px-5 py-4 text-sm text-chalk-dim border-t border-asphalt-700">Nobody picked this round.</p>
+                ) : (
+                  <ol>
+                    <li className="grid grid-cols-[2.5rem_1fr_auto] sm:grid-cols-[2.5rem_1fr_1fr_4rem_4rem_4rem_4.5rem] items-center gap-2 px-4 sm:px-5 py-2 border-t border-asphalt-700">
+                      <span className="t-eyebrow">Pos</span>
+                      <span className="t-eyebrow">Player</span>
+                      <span className="t-eyebrow hidden sm:block">Pick</span>
+                      <span className="t-eyebrow text-right hidden sm:block">Drv</span>
+                      <span className="t-eyebrow text-right hidden sm:block">Con</span>
+                      <span className="t-eyebrow text-right hidden sm:block">RC</span>
+                      <span className="t-eyebrow text-right">Total</span>
+                    </li>
+                    {rows.map((s, i) => {
+                      const isYou = s.userId === userId;
+                      const best = i === 0 && s.totalPoints > 0 && s.totalPoints === top;
+                      return (
+                        <li
+                          key={s.id}
+                          className={`grid grid-cols-[2.5rem_1fr_auto] sm:grid-cols-[2.5rem_1fr_1fr_4rem_4rem_4rem_4.5rem] items-center gap-2 px-4 sm:px-5 py-2.5 border-t border-asphalt-700 ${
+                            isYou ? "bg-asphalt-800/70" : ""
+                          }`}
+                        >
+                          <span className={`t-display text-2xl ${best ? "text-sector-purple" : "text-chalk"}`}>{i + 1}</span>
+                          <span className="min-w-0">
+                            <span className="flex items-center gap-2">
+                              <span className="t-code text-base text-chalk">{codes.get(s.userId)}</span>
+                              <span className="text-sm text-chalk-dim truncate">{s.user.name}</span>
+                            </span>
+                            <span className="sm:hidden mt-1 block">
+                              <PickChip pick={s.pick} size="sm" />
+                            </span>
+                          </span>
+                          <span className="hidden sm:block">
+                            <PickChip pick={s.pick} size="sm" />
+                          </span>
+                          <span className="t-num text-sm text-right text-chalk-dim hidden sm:block">{s.driverPoints}</span>
+                          <span className="t-num text-sm text-right text-chalk-dim hidden sm:block">{s.constructorPoints}</span>
+                          <span className="t-num text-sm text-right text-chalk-dim hidden sm:block">{s.raceControlPoints}</span>
+                          <span className={`t-num text-lg font-bold text-right ${best ? "text-sector-purple" : "text-chalk"}`}>
+                            {s.totalPoints}
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ol>
+                )}
+              </section>
             );
           })}
         </div>

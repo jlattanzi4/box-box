@@ -5,15 +5,9 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { PageHeader } from "@/components/page-header";
+import { Countdown } from "@/components/countdown";
 
 interface League {
   id: string;
@@ -22,126 +16,180 @@ interface League {
   seasonYear: number;
   role: string;
   memberCount: number;
+  position: number | null;
+  totalPoints: number;
+  gap: number;
+  leaderCode: string | null;
+  leaderName: string | null;
+  hasPickForNextRace: boolean;
+}
+
+interface NextRace {
+  id: string;
+  round: number;
+  name: string;
+  raceDate: string;
+  pickDeadline: string;
 }
 
 export default function DashboardPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
   const [leagues, setLeagues] = useState<League[]>([]);
+  const [nextRace, setNextRace] = useState<NextRace | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (status === "unauthenticated") {
-      router.push("/login");
-    }
+    if (status === "unauthenticated") router.push("/login");
   }, [status, router]);
 
   useEffect(() => {
-    if (session?.user) {
-      fetch("/api/leagues")
-        .then((r) => r.json())
-        .then((data) => {
-          setLeagues(data);
-          setLoading(false);
-        })
-        .catch(() => setLoading(false));
-    }
+    if (!session?.user) return;
+    fetch("/api/leagues")
+      .then((r) => r.json())
+      .then((data) => {
+        setLeagues(data.leagues ?? []);
+        setNextRace(data.nextRace ?? null);
+      })
+      .finally(() => setLoading(false));
   }, [session]);
 
   if (status === "loading" || loading) {
     return (
-      <div className="space-y-6">
-        <Skeleton className="h-10 w-48" />
+      <div className="space-y-8">
+        <Skeleton className="h-16 w-64 bg-asphalt-700" />
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Skeleton className="h-36 rounded-xl" />
-          <Skeleton className="h-36 rounded-xl" />
+          <Skeleton className="h-40 rounded-xl bg-asphalt-700" />
+          <Skeleton className="h-40 rounded-xl bg-asphalt-700" />
         </div>
       </div>
     );
   }
 
+  const firstName = session?.user?.name?.split(" ")[0] ?? "there";
+  const needsPick = leagues.filter((l) => !l.hasPickForNextRace);
+
   return (
     <div className="space-y-8">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-black tracking-tight">Dashboard</h1>
-          <p className="text-muted-foreground mt-1">
-            Welcome back, {session?.user?.name}
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <Link href="/leagues/create">
-            <Button className="font-semibold">Create League</Button>
-          </Link>
-          <Link href="/leagues/join">
-            <Button variant="outline" className="border-border/50">
-              Join League
+      <PageHeader
+        eyebrow={`Welcome back, ${firstName}`}
+        title="Your leagues"
+        actions={
+          <>
+            <Button asChild>
+              <Link href="/leagues/create">Create league</Link>
             </Button>
-          </Link>
+            <Button asChild variant="outline">
+              <Link href="/leagues/join">Join with code</Link>
+            </Button>
+          </>
+        }
+      />
+
+      {nextRace && leagues.length > 0 && (
+        <div className="pit-board fade-up">
+          <div className="pit-board-row">
+            <span>
+              <span className="t-eyebrow block">Next up · Round {nextRace.round}</span>
+              <span className="t-code text-xl text-chalk">{nextRace.name.replace(" Grand Prix", " GP")}</span>
+            </span>
+            <span className="text-right">
+              <span className="t-eyebrow block">Lights out in</span>
+              <Countdown to={nextRace.raceDate} className="pit-board-value text-3xl sm:text-4xl t-num" />
+            </span>
+          </div>
+          <div className="pit-board-row items-center">
+            <span className="text-sm text-chalk-dim">
+              {needsPick.length === 0
+                ? "You've picked in every league. Nothing to do but wait."
+                : `${needsPick.length === 1 ? "One league is" : `${needsPick.length} leagues are`} still waiting on your pick.`}
+            </span>
+            {needsPick.length > 0 && (
+              <Button asChild size="sm" variant="board">
+                <Link href={`/leagues/${needsPick[0].id}/picks`}>Pick now</Link>
+              </Button>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       {leagues.length === 0 ? (
-        <Card className="border-border/50 bg-card/50 bg-dot-pattern">
-          <CardContent className="flex flex-col items-center justify-center py-16 gap-6">
-            <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center shadow-[0_0_25px_-5px_var(--f1-red)]">
-              <span className="text-2xl font-black text-primary">BB</span>
+        <div className="pit-board fade-up">
+          <div className="kerb" />
+          <div className="p-8 sm:p-12 text-center space-y-4">
+            <p className="t-display text-4xl text-chalk">No leagues yet</p>
+            <p className="text-chalk-dim max-w-sm mx-auto">
+              Start one and send the invite code to the group chat, or join one a friend already made.
+            </p>
+            <div className="flex justify-center gap-3 pt-2">
+              <Button asChild>
+                <Link href="/leagues/create">Create league</Link>
+              </Button>
+              <Button asChild variant="outline">
+                <Link href="/leagues/join">Join with code</Link>
+              </Button>
             </div>
-            <div className="text-center space-y-2">
-              <p className="text-lg font-semibold">No leagues yet</p>
-              <p className="text-muted-foreground max-w-sm">
-                Create a new league and invite your friends, or join an existing
-                one with an invite code.
-              </p>
-            </div>
-            <div className="flex gap-3">
-              <Link href="/leagues/create">
-                <Button className="font-semibold">Create a League</Button>
-              </Link>
-              <Link href="/leagues/join">
-                <Button variant="outline" className="border-border/50">
-                  Join with Code
-                </Button>
-              </Link>
-            </div>
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 stagger-children">
-          {leagues.map((league) => (
-            <Link key={league.id} href={`/leagues/${league.id}`}>
-              <Card className="border-border/50 bg-card/50 hover:bg-card/80 hover:border-primary/30 hover:-translate-y-1 hover:shadow-[0_0_30px_-10px_var(--f1-red)] transition-all duration-300 cursor-pointer group overflow-hidden relative">
-                <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-[#FF8700] via-[#E80020] to-[#3671C6] opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-                <CardHeader className="pb-3">
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="text-xl font-bold group-hover:text-primary transition-colors">
-                      {league.name}
-                    </CardTitle>
-                    <Badge
-                      variant={league.role === "admin" ? "default" : "secondary"}
-                      className="text-xs"
-                    >
-                      {league.role}
-                    </Badge>
-                  </div>
-                  <CardDescription>
-                    {league.memberCount} member
-                    {league.memberCount !== 1 ? "s" : ""} &middot;{" "}
-                    {league.seasonYear} Season
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground">Invite:</span>
-                    <code className="text-sm font-mono font-semibold bg-muted/50 px-2 py-0.5 rounded">
-                      {league.inviteCode}
-                    </code>
-                  </div>
-                </CardContent>
-              </Card>
-            </Link>
-          ))}
+          </div>
         </div>
+      ) : (
+        <ul className="grid grid-cols-1 md:grid-cols-2 gap-4 stagger">
+          {leagues.map((league) => {
+            const leading = league.position === 1 && league.totalPoints > 0;
+            return (
+              <li key={league.id}>
+                <Link
+                  href={`/leagues/${league.id}`}
+                  className="group block panel hover:border-asphalt-500 transition-colors overflow-hidden"
+                >
+                  <div className="flex items-stretch">
+                    <div
+                      className={`w-20 sm:w-24 shrink-0 flex flex-col items-center justify-center border-r border-asphalt-600 ${
+                        leading ? "bg-sector-purple/15" : "bg-asphalt-950"
+                      }`}
+                    >
+                      <span className="t-eyebrow">Pos</span>
+                      <span className={`t-display text-5xl ${leading ? "text-sector-purple" : "text-chalk"}`}>
+                        {league.position ?? "–"}
+                      </span>
+                    </div>
+                    <div className="flex-1 min-w-0 p-4 sm:p-5">
+                      <div className="flex items-start justify-between gap-3">
+                        <h2 className="t-code text-2xl text-chalk truncate group-hover:text-flag-yellow transition-colors">
+                          {league.name}
+                        </h2>
+                        <span className="t-eyebrow shrink-0 pt-1">
+                          {league.memberCount} {league.memberCount === 1 ? "player" : "players"}
+                        </span>
+                      </div>
+                      <div className="mt-3 flex items-baseline gap-4 t-num">
+                        <span className="text-2xl font-bold text-chalk">
+                          {league.totalPoints}
+                          <span className="text-xs text-chalk-dim font-normal ml-1">pts</span>
+                        </span>
+                        <span className="text-sm text-chalk-dim">
+                          {leading
+                            ? "Leading"
+                            : league.leaderCode
+                              ? `+${league.gap} to ${league.leaderCode}`
+                              : ""}
+                        </span>
+                      </div>
+                      {nextRace && (
+                        <p className="mt-3 text-xs">
+                          {league.hasPickForNextRace ? (
+                            <span className="text-sector-green">Pick made for R{nextRace.round}</span>
+                          ) : (
+                            <span className="text-flag-yellow">Pick needed for R{nextRace.round}</span>
+                          )}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
       )}
     </div>
   );

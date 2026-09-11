@@ -1,178 +1,127 @@
 import { redirect } from "next/navigation";
-import Link from "next/link";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { getTeamColor } from "@/lib/team-colors";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
+import { playerCodes } from "@/lib/player-code";
+import { PageHeader } from "@/components/page-header";
+import { LeagueNav } from "@/components/league-nav";
+import { PickChip } from "@/components/pick-chip";
 
-export default async function HistoryPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
+export default async function HistoryPage({ params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
+  const userId = session.user.id;
 
   const { id: leagueId } = await params;
 
-  const member = await prisma.leagueMember.findUnique({
-    where: { leagueId_userId: { leagueId, userId: session.user!.id } },
-  });
-  if (!member) redirect("/dashboard");
-
   const league = await prisma.league.findUnique({
     where: { id: leagueId },
-    include: {
-      members: {
-        include: { user: { select: { id: true, name: true } } },
-      },
-    },
+    include: { members: { include: { user: { select: { id: true, name: true } } } } },
   });
-  if (!league) redirect("/dashboard");
+  if (!league || !league.members.some((m) => m.userId === userId)) redirect("/dashboard");
 
-  const races = await prisma.race.findMany({
-    where: { seasonYear: league.seasonYear },
-    orderBy: { round: "asc" },
-  });
+  const codes = playerCodes(league.members.map((m) => ({ id: m.userId, name: m.user.name })));
 
-  const picks = await prisma.pick.findMany({
-    where: { leagueId },
-    include: {
-      driver: true,
-      constructor: true,
-      score: true,
-    },
-  });
+  const [races, picks] = await Promise.all([
+    prisma.race.findMany({ where: { seasonYear: league.seasonYear }, orderBy: { round: "asc" } }),
+    prisma.pick.findMany({
+      where: { leagueId },
+      include: { driver: true, constructor: true, score: true },
+    }),
+  ]);
 
-  const pickMap = new Map<string, Map<string, (typeof picks)[0]>>();
-  for (const pick of picks) {
-    if (!pickMap.has(pick.userId)) pickMap.set(pick.userId, new Map());
-    pickMap.get(pick.userId)!.set(pick.raceId, pick);
+  const now = new Date();
+  const pickMap = new Map<string, Map<string, (typeof picks)[number]>>();
+  for (const p of picks) {
+    if (!pickMap.has(p.userId)) pickMap.set(p.userId, new Map());
+    pickMap.get(p.userId)!.set(p.raceId, p);
   }
+
+  // Running totals so the matrix doubles as a season graph.
+  const running = new Map<string, number>(league.members.map((m) => [m.userId, 0]));
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-black tracking-tight">
-          Season Pick History
-        </h1>
-        <Link href={`/leagues/${leagueId}`}>
-          <Button variant="outline" className="border-border/50">
-            Back to League
-          </Button>
-        </Link>
-      </div>
+      <PageHeader eyebrow={league.name} title="Season history" description="Every pick, every round. Picks stay hidden until lights out." />
+      <LeagueNav leagueId={leagueId} />
 
-      <Card className="border-border/50 bg-card/50">
-        <CardHeader>
-          <CardTitle className="text-xl font-bold">All Picks by Race</CardTitle>
-        </CardHeader>
-        <CardContent className="overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow className="border-border/30">
-                <TableHead className="sticky left-0 bg-card/90 backdrop-blur z-10">
-                  Race
-                </TableHead>
-                {league.members.map((m) => (
-                  <TableHead
-                    key={m.userId}
-                    className="text-center min-w-[140px]"
-                  >
+      <div className="pit-board overflow-x-auto fade-up">
+        <table className="w-full text-sm border-collapse">
+          <thead>
+            <tr>
+              <th className="sticky left-0 z-10 bg-asphalt-950 text-left px-3 sm:px-4 py-3 t-eyebrow font-semibold border-b border-asphalt-700">
+                Round
+              </th>
+              {league.members.map((m) => (
+                <th key={m.userId} className="px-3 py-3 text-left min-w-[10rem] border-b border-asphalt-700">
+                  <span className="t-code text-lg text-chalk">{codes.get(m.userId)}</span>
+                  <span className="block text-xs text-chalk-dim font-normal truncate">
                     {m.user.name}
-                    {m.userId === session.user!.id && (
-                      <Badge
-                        variant="outline"
-                        className="ml-1 text-xs border-primary/30 text-primary"
-                      >
-                        You
-                      </Badge>
-                    )}
-                  </TableHead>
-                ))}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {races.map((race) => (
-                <TableRow
+                    {m.userId === userId && <span className="ml-1 text-flag-yellow">· you</span>}
+                  </span>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {races.map((race) => {
+              const locked = race.pickDeadline <= now;
+              const cancelled = race.status === "cancelled";
+              const scored = race.status === "completed";
+              return (
+                <tr
                   key={race.id}
-                  className={`border-border/20 ${race.status === "upcoming" ? "opacity-50" : ""}`}
+                  className={`border-t border-asphalt-700 ${!locked || cancelled ? "text-chalk-faint" : ""}`}
                 >
-                  <TableCell className="sticky left-0 bg-card/90 backdrop-blur z-10 font-medium whitespace-nowrap">
-                    <span className="text-muted-foreground font-mono text-xs mr-2">
-                      R{race.round}
+                  <th
+                    scope="row"
+                    className="sticky left-0 z-10 bg-asphalt-950 text-left px-3 sm:px-4 py-2.5 font-normal whitespace-nowrap"
+                  >
+                    <span className="t-num text-xs text-chalk-dim mr-2">R{String(race.round).padStart(2, "0")}</span>
+                    <span className={`t-code text-base ${cancelled ? "line-through" : ""}`}>
+                      {race.name.replace(" Grand Prix", "")}
                     </span>
-                    {race.name.replace(" Grand Prix", " GP")}
-                  </TableCell>
+                    {cancelled && <span className="ml-2 t-eyebrow">cancelled</span>}
+                  </th>
                   {league.members.map((m) => {
                     const pick = pickMap.get(m.userId)?.get(race.id);
-                    if (!pick) {
+                    if (cancelled) {
+                      return <td key={m.userId} className="px-3 py-2.5 text-chalk-faint">—</td>;
+                    }
+                    if (!locked) {
                       return (
-                        <TableCell
-                          key={m.userId}
-                          className="text-center text-muted-foreground text-sm"
-                        >
-                          {race.status === "upcoming" ? "\u2014" : "No pick"}
-                        </TableCell>
+                        <td key={m.userId} className="px-3 py-2.5 text-xs">
+                          {pick && m.userId === userId ? (
+                            <PickChip pick={pick} size="sm" />
+                          ) : pick ? (
+                            <span className="text-sector-green">Picked</span>
+                          ) : (
+                            <span className="text-chalk-faint">Waiting</span>
+                          )}
+                        </td>
                       );
                     }
-
-                    const pickConstructor = pick.constructor as { jolpicaId?: string; name?: string } | null;
-                    const teamCol = pickConstructor?.jolpicaId
-                      ? getTeamColor(pickConstructor.jolpicaId)
-                      : null;
-
+                    const pts = pick?.score?.totalPoints ?? 0;
+                    if (scored) running.set(m.userId, (running.get(m.userId) ?? 0) + pts);
                     return (
-                      <TableCell key={m.userId} className="text-center">
-                        <div className="text-sm">
-                          {pick.pickType === "race_control" ? (
-                            <Badge
-                              variant="secondary"
-                              className="text-xs bg-primary/10 text-primary"
-                            >
-                              RC
-                            </Badge>
-                          ) : (
-                            <span className="font-mono inline-flex items-center gap-1.5">
-                              {teamCol && (
-                                <span
-                                  className="inline-block w-2 h-2 rounded-full shrink-0"
-                                  style={{ backgroundColor: teamCol }}
-                                />
-                              )}
-                              {pick.driver?.code} + {pickConstructor?.name}
+                      <td key={m.userId} className="px-3 py-2.5 align-top">
+                        <div className="flex items-center justify-between gap-2">
+                          <PickChip pick={pick} size="sm" />
+                          {scored && pick && (
+                            <span className="t-num text-right shrink-0">
+                              <span className={`block font-bold ${pts > 0 ? "text-chalk" : "text-chalk-dim"}`}>+{pts}</span>
+                              <span className="block text-[0.65rem] text-chalk-faint">{running.get(m.userId)}</span>
                             </span>
                           )}
                         </div>
-                        {pick.score && (
-                          <div className={`text-xs font-mono font-bold mt-0.5 ${pick.score.totalPoints > 0 ? "text-primary" : "text-muted-foreground"}`}>
-                            {pick.score.totalPoints} pts
-                          </div>
-                        )}
-                      </TableCell>
+                      </td>
                     );
                   })}
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

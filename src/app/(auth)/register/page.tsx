@@ -7,13 +7,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { FormShell } from "@/components/form-shell";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -33,24 +27,17 @@ export default function RegisterPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, email, password }),
     });
-
     if (!res.ok) {
       const data = await res.json();
-      setError(data.error || "Registration failed.");
+      setError(data.error || "Couldn't create the account.");
       setLoading(false);
       return;
     }
 
-    const result = await signIn("credentials", {
-      email,
-      password,
-      redirect: false,
-    });
-
+    const result = await signIn("credentials", { email, password, redirect: false });
     setLoading(false);
-
     if (result?.error) {
-      setError("Account created but sign in failed. Try signing in manually.");
+      setError("Account created, but sign-in failed. Try signing in.");
     } else {
       router.push("/dashboard");
       router.refresh();
@@ -58,69 +45,66 @@ export default function RegisterPage() {
   }
 
   return (
-    <div className="flex items-center justify-center min-h-[80vh] bg-dot-pattern">
-      <Card className="w-full max-w-sm border-border/50 bg-card/50 backdrop-blur shadow-[0_0_40px_-15px_var(--f1-red)] animate-[fade-in-up_0.5s_ease-out_both]">
-        <CardHeader className="text-center">
-          <div className="mx-auto w-12 h-12 rounded-xl bg-primary flex items-center justify-center mb-2 shadow-[0_0_20px_-5px_var(--f1-red)] animate-[glow-pulse_3s_ease-in-out_infinite]">
-            <span className="text-sm font-black text-primary-foreground">BB</span>
-          </div>
-          <CardTitle className="text-2xl font-black">Create account</CardTitle>
-          <CardDescription>
-            Join Box Box and race against your friends
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {error && (
-              <p className="text-sm text-destructive bg-destructive/10 p-3 rounded-lg">
-                {error}
-              </p>
-            )}
-            <div className="space-y-2">
-              <Label htmlFor="name">Name</Label>
-              <Input
-                id="name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Your name"
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@example.com"
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Min. 6 characters"
-                minLength={6}
-                required
-              />
-            </div>
-            <Button type="submit" className="w-full font-semibold hover:shadow-[0_0_20px_-5px_var(--f1-red)] transition-shadow duration-300" disabled={loading}>
-              {loading ? "Creating account..." : "Create Account"}
-            </Button>
-            <p className="text-sm text-center text-muted-foreground">
-              Already have an account?{" "}
-              <Link href="/login" className="text-primary hover:underline font-medium">
-                Sign in
-              </Link>
-            </p>
-          </form>
-        </CardContent>
-      </Card>
-    </div>
+    <FormShell
+      eyebrow="New driver"
+      title="Create account"
+      description="Your name is what your league sees on the timing tower."
+      footer={
+        <>
+          Already registered?{" "}
+          <Link href="/login" className="text-chalk underline underline-offset-4 hover:text-flag-yellow">
+            Sign in
+          </Link>
+        </>
+      }
+    >
+      <form onSubmit={handleSubmit} className="space-y-4">
+        {error && (
+          <p role="alert" className="text-sm text-chalk bg-kerb/15 border border-kerb/40 rounded-md px-3 py-2">
+            {error}
+          </p>
+        )}
+        <div className="space-y-1.5">
+          <Label htmlFor="name" className="t-eyebrow">Name</Label>
+          <Input
+            id="name"
+            autoComplete="name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className="h-11 bg-asphalt-900 border-asphalt-600"
+            required
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="email" className="t-eyebrow">Email</Label>
+          <Input
+            id="email"
+            type="email"
+            autoComplete="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="h-11 bg-asphalt-900 border-asphalt-600"
+            required
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="password" className="t-eyebrow">Password</Label>
+          <Input
+            id="password"
+            type="password"
+            autoComplete="new-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="At least 6 characters"
+            minLength={6}
+            className="h-11 bg-asphalt-900 border-asphalt-600"
+            required
+          />
+        </div>
+        <Button type="submit" size="lg" className="w-full" disabled={loading}>
+          {loading ? "Creating…" : "Create account"}
+        </Button>
+      </form>
+    </FormShell>
   );
 }

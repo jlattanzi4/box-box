@@ -7,13 +7,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { FormShell } from "@/components/form-shell";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -26,17 +20,10 @@ export default function LoginPage() {
     e.preventDefault();
     setError("");
     setLoading(true);
-
-    const result = await signIn("credentials", {
-      email,
-      password,
-      redirect: false,
-    });
-
+    const result = await signIn("credentials", { email, password, redirect: false });
     setLoading(false);
-
     if (result?.error) {
-      setError("Invalid email or password.");
+      setError("That email and password don't match.");
     } else {
       router.push("/dashboard");
       router.refresh();
@@ -44,57 +31,52 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex items-center justify-center min-h-[80vh] bg-dot-pattern">
-      <Card className="w-full max-w-sm border-border/50 bg-card/50 backdrop-blur shadow-[0_0_40px_-15px_var(--f1-red)] animate-[fade-in-up_0.5s_ease-out_both]">
-        <CardHeader className="text-center">
-          <div className="mx-auto w-12 h-12 rounded-xl bg-primary flex items-center justify-center mb-2 shadow-[0_0_20px_-5px_var(--f1-red)] animate-[glow-pulse_3s_ease-in-out_infinite]">
-            <span className="text-sm font-black text-primary-foreground">BB</span>
-          </div>
-          <CardTitle className="text-2xl font-black">Welcome back</CardTitle>
-          <CardDescription>
-            Sign in to your Box Box account
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {error && (
-              <p className="text-sm text-destructive bg-destructive/10 p-3 rounded-lg">
-                {error}
-              </p>
-            )}
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@example.com"
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-              />
-            </div>
-            <Button type="submit" className="w-full font-semibold hover:shadow-[0_0_20px_-5px_var(--f1-red)] transition-shadow duration-300" disabled={loading}>
-              {loading ? "Signing in..." : "Sign In"}
-            </Button>
-            <p className="text-sm text-center text-muted-foreground">
-              Don&apos;t have an account?{" "}
-              <Link href="/register" className="text-primary hover:underline font-medium">
-                Register
-              </Link>
-            </p>
-          </form>
-        </CardContent>
-      </Card>
-    </div>
+    <FormShell
+      eyebrow="Welcome back"
+      title="Sign in"
+      footer={
+        <>
+          New here?{" "}
+          <Link href="/register" className="text-chalk underline underline-offset-4 hover:text-flag-yellow">
+            Create an account
+          </Link>
+        </>
+      }
+    >
+      <form onSubmit={handleSubmit} className="space-y-4">
+        {error && (
+          <p role="alert" className="text-sm text-chalk bg-kerb/15 border border-kerb/40 rounded-md px-3 py-2">
+            {error}
+          </p>
+        )}
+        <div className="space-y-1.5">
+          <Label htmlFor="email" className="t-eyebrow">Email</Label>
+          <Input
+            id="email"
+            type="email"
+            autoComplete="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="h-11 bg-asphalt-900 border-asphalt-600"
+            required
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="password" className="t-eyebrow">Password</Label>
+          <Input
+            id="password"
+            type="password"
+            autoComplete="current-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className="h-11 bg-asphalt-900 border-asphalt-600"
+            required
+          />
+        </div>
+        <Button type="submit" size="lg" className="w-full" disabled={loading}>
+          {loading ? "Signing in…" : "Sign in"}
+        </Button>
+      </form>
+    </FormShell>
   );
 }

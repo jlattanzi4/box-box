@@ -40,7 +40,8 @@ const drivers2026 = [
   { jolpicaId: "ocon", code: "OCO", firstName: "Esteban", lastName: "Ocon", number: 31, constructorJolpicaId: "haas" },
   { jolpicaId: "bearman", code: "BEA", firstName: "Oliver", lastName: "Bearman", number: 87, constructorJolpicaId: "haas" },
   { jolpicaId: "lawson", code: "LAW", firstName: "Liam", lastName: "Lawson", number: 30, constructorJolpicaId: "rb" },
-  { jolpicaId: "lindblad", code: "LIN", firstName: "Arvid", lastName: "Lindblad", number: 27, constructorJolpicaId: "rb" },
+  { jolpicaId: "arvid_lindblad", code: "LIN", firstName: "Arvid", lastName: "Lindblad", number: 41, constructorJolpicaId: "rb" },
+  { jolpicaId: "tsunoda", code: "TSU", firstName: "Yuki", lastName: "Tsunoda", number: 22, constructorJolpicaId: "rb" }, // stand-in from R14; the results cron auto-adds any driver it sees
   { jolpicaId: "albon", code: "ALB", firstName: "Alex", lastName: "Albon", number: 23, constructorJolpicaId: "williams" },
   { jolpicaId: "sainz", code: "SAI", firstName: "Carlos", lastName: "Sainz", number: 55, constructorJolpicaId: "williams" },
   { jolpicaId: "hulkenberg", code: "HUL", firstName: "Nico", lastName: "Hulkenberg", number: 27, constructorJolpicaId: "audi" },

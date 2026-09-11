@@ -2,16 +2,11 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { FormShell } from "@/components/form-shell";
 
 export default function CreateLeaguePage() {
   const router = useRouter();
@@ -23,56 +18,56 @@ export default function CreateLeaguePage() {
     e.preventDefault();
     setError("");
     setLoading(true);
-
     const res = await fetch("/api/leagues", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name }),
     });
-
     const data = await res.json();
     setLoading(false);
-
     if (!res.ok) {
-      setError(data.error || "Failed to create league.");
+      setError(data.error || "Couldn't create the league.");
       return;
     }
-
     router.push(`/leagues/${data.id}`);
   }
 
   return (
-    <div className="flex items-center justify-center min-h-[70vh]">
-      <Card className="w-full max-w-sm border-border/50 bg-card/50 backdrop-blur">
-        <CardHeader className="text-center">
-          <CardTitle className="text-2xl font-black">Create a League</CardTitle>
-          <CardDescription>
-            Start a new league and invite your friends with a code.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {error && (
-              <p className="text-sm text-destructive bg-destructive/10 p-3 rounded-lg">
-                {error}
-              </p>
-            )}
-            <div className="space-y-2">
-              <Label htmlFor="name">League Name</Label>
-              <Input
-                id="name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. The Grid Crew"
-                required
-              />
-            </div>
-            <Button type="submit" className="w-full font-semibold" disabled={loading}>
-              {loading ? "Creating..." : "Create League"}
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
-    </div>
+    <FormShell
+      eyebrow="New league"
+      title="Create league"
+      description="You'll get an invite code to send to the group chat."
+      footer={
+        <>
+          Got a code already?{" "}
+          <Link href="/leagues/join" className="text-chalk underline underline-offset-4 hover:text-flag-yellow">
+            Join a league
+          </Link>
+        </>
+      }
+    >
+      <form onSubmit={handleSubmit} className="space-y-4">
+        {error && (
+          <p role="alert" className="text-sm text-chalk bg-kerb/15 border border-kerb/40 rounded-md px-3 py-2">
+            {error}
+          </p>
+        )}
+        <div className="space-y-1.5">
+          <Label htmlFor="name" className="t-eyebrow">League name</Label>
+          <Input
+            id="name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="The Grid Crew"
+            maxLength={50}
+            className="h-11 bg-asphalt-900 border-asphalt-600"
+            required
+          />
+        </div>
+        <Button type="submit" size="lg" className="w-full" disabled={loading}>
+          {loading ? "Creating…" : "Create league"}
+        </Button>
+      </form>
+    </FormShell>
   );
 }

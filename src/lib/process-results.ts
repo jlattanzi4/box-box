@@ -99,9 +99,25 @@ export async function processResults(opts: ProcessOptions = {}): Promise<Process
 
       // 1. Save race results
       for (const result of jolpicaResults) {
-        const driver = await prisma.driver.findUnique({ where: { jolpicaId: result.Driver.driverId } });
         const constructor = await prisma.constructor.findUnique({ where: { jolpicaId: result.Constructor.constructorId } });
-        if (!driver || !constructor) continue;
+        if (!constructor) {
+          console.warn(`${label}: unknown constructor ${result.Constructor.constructorId}, skipping ${result.Driver.driverId}`);
+          continue;
+        }
+        // Stand-ins and mid-season swaps: any driver Jolpica classifies gets a
+        // row, so constructor totals never silently miss a car.
+        const driver = await prisma.driver.upsert({
+          where: { jolpicaId: result.Driver.driverId },
+          update: {},
+          create: {
+            jolpicaId: result.Driver.driverId,
+            code: result.Driver.code ?? result.Driver.familyName.slice(0, 3).toUpperCase(),
+            firstName: result.Driver.givenName,
+            lastName: result.Driver.familyName,
+            number: parseInt(result.Driver.permanentNumber ?? result.number) || 0,
+            constructorId: constructor.id,
+          },
+        });
 
         const data = {
           constructorId: constructor.id,

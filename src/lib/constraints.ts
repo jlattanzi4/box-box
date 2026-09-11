@@ -1,5 +1,5 @@
 import { prisma } from "./prisma";
-import { MAX_CONSTRUCTOR_USES, MAX_DRIVER_USES, MAX_RACE_CONTROL_PICKS, SEASON_YEAR } from "@/types";
+import { MAX_CONSTRUCTOR_USES, MAX_RACE_CONTROL_PICKS, SEASON_YEAR } from "@/types";
 import type { PickConstraints } from "@/types";
 
 export async function getPickConstraints(

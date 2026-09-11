@@ -141,6 +141,32 @@ src/
     └── index.ts                    # Shared types + constants
 ```
 
+## Operations
+
+### Re-scoring a race
+
+Results are pulled automatically by the daily cron. If a race needs to be
+re-run (API data corrected, a driver swap, a stand-in), rescore it by DB round
+number from your machine:
+
+```bash
+npx tsx --env-file=.env scripts/reprocess-race.ts 14 15
+```
+
+Or hit the cron endpoint with a body from anywhere:
+
+```bash
+curl -X POST https://<your-domain>/api/cron/update-results \
+  -H "Authorization: Bearer $CRON_SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{"raceIds":["<race id>"],"force":true}'
+```
+
+Rounds are matched to the Jolpica calendar by **race date**, so cancelled
+races renumbering the season and circuit-name spelling differences no longer
+matter. Drivers that appear in results but not in the DB (stand-ins) are
+created automatically so constructor totals stay correct.
+
 ## Deployment
 
 The app is deployed on Vercel. Pushes to `main` auto-deploy.
