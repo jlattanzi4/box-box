@@ -84,39 +84,89 @@ export async function getRaceCalendar(year: number) {
   return data.MRData.RaceTable.Races;
 }
 
-/** Normalise a circuit name for fuzzy comparison: lowercase, collapse punctuation/spaces. */
+/** Normalise a circuit name for fuzzy comparison: lowercase, strip accents/punctuation, collapse spaces. */
 function normaliseCircuit(name: string): string {
   return name
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "") // strip accents (Autódromo → Autodromo)
     .toLowerCase()
-    .replace(/[-–—]/g, " ")   // hyphens/dashes → space
-    .replace(/[^a-z0-9 ]/g, "") // strip other punctuation
+    .replace(/[-–—]/g, " ")
+    .replace(/[^a-z0-9 ]/g, "")
     .replace(/\s+/g, " ")
     .trim();
 }
 
-/**
- * Builds a map of normalised circuitName → Jolpica round number for the year.
- * Jolpica renumbers rounds when races are cancelled, so this is the
- * source of truth for the correct round when fetching results.
- * Normalisation handles differences like "Circuit Gilles-Villeneuve" vs
- * "Circuit Gilles Villeneuve", "Albert Park Circuit" vs "Albert Park Grand
- * Prix Circuit", accent variants, etc.
- */
-export async function getJolpicaRoundMap(year: number): Promise<Map<string, number>> {
-  const races = await getRaceCalendar(year);
-  const map = new Map<string, number>();
-  for (const race of races) {
-    map.set(normaliseCircuit(race.Circuit.circuitName), parseInt(race.round));
-  }
-  return map;
+// Words that appear in almost every circuit name and carry no identity.
+const CIRCUIT_STOPWORDS = new Set([
+  "circuit", "grand", "prix", "international", "autodromo", "autodrome",
+  "nazionale", "national", "park", "street", "racing", "course", "ring",
+  "de", "di", "del", "la", "le", "of", "the", "city", "corniche", "strip",
+]);
+
+function circuitTokens(name: string): Set<string> {
+  return new Set(
+    normaliseCircuit(name)
+      .split(" ")
+      .filter((t) => t.length > 2 && !CIRCUIT_STOPWORDS.has(t))
+  );
 }
 
-/** Look up the Jolpica round for a DB circuit name, returning null if not found. */
+export interface JolpicaCalendarEntry {
+  round: number;
+  raceName: string;
+  circuitName: string;
+  /** ISO date, e.g. "2026-09-06" */
+  date: string;
+}
+
+/** The season calendar as Jolpica sees it (rounds are renumbered after cancellations). */
+export async function getJolpicaCalendar(year: number): Promise<JolpicaCalendarEntry[]> {
+  const races = await getRaceCalendar(year);
+  return races.map((r) => ({
+    round: parseInt(r.round),
+    raceName: r.raceName,
+    circuitName: r.Circuit.circuitName,
+    date: r.date,
+  }));
+}
+
+/**
+ * Resolves which Jolpica round corresponds to one of our DB races.
+ *
+ * 1. Date match — a Grand Prix on the same calendar day (±1 day for timezone
+ *    edge cases) is unambiguous and immune to circuit-name spelling drift.
+ * 2. Exact normalised circuit name.
+ * 3. Shared distinctive circuit token ("zandvoort", "monza", "interlagos").
+ *
+ * Returns null when nothing matches; callers must NOT fall back to the DB round
+ * number, because Jolpica renumbers rounds when races are cancelled.
+ */
 export function lookupJolpicaRound(
-  roundMap: Map<string, number>,
-  dbCircuitName: string
-): number | null {
-  return roundMap.get(normaliseCircuit(dbCircuitName)) ?? null;
+  calendar: JolpicaCalendarEntry[],
+  race: { raceDate: Date; circuitName: string }
+): JolpicaCalendarEntry | null {
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const raceDay = Date.UTC(
+    race.raceDate.getUTCFullYear(),
+    race.raceDate.getUTCMonth(),
+    race.raceDate.getUTCDate()
+  );
+
+  const byDate = calendar.find((entry) => {
+    const [y, m, d] = entry.date.split("-").map(Number);
+    return Math.abs(Date.UTC(y, m - 1, d) - raceDay) <= DAY_MS;
+  });
+  if (byDate) return byDate;
+
+  const wanted = normaliseCircuit(race.circuitName);
+  const exact = calendar.find((e) => normaliseCircuit(e.circuitName) === wanted);
+  if (exact) return exact;
+
+  const wantedTokens = circuitTokens(race.circuitName);
+  const fuzzy = calendar.find((e) =>
+    [...circuitTokens(e.circuitName)].some((t) => wantedTokens.has(t))
+  );
+  return fuzzy ?? null;
 }
 
 export async function getRaceResults(year: number, round: number) {
