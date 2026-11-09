@@ -22,7 +22,7 @@ interface RaceTable {
   };
 }
 
-interface JolpicaRace {
+export interface JolpicaRace {
   season: string;
   round: string;
   url: string;
@@ -117,17 +117,24 @@ export interface JolpicaCalendarEntry {
   circuitName: string;
   /** ISO date, e.g. "2026-09-06" */
   date: string;
+  /** Official race start, or null when Jolpica hasn't published a time. */
+  startsAt: Date | null;
+}
+
+export function toCalendarEntry(race: JolpicaRace): JolpicaCalendarEntry {
+  return {
+    round: parseInt(race.round),
+    raceName: race.raceName,
+    circuitName: race.Circuit.circuitName,
+    date: race.date,
+    startsAt: race.time ? new Date(`${race.date}T${race.time}`) : null,
+  };
 }
 
 /** The season calendar as Jolpica sees it (rounds are renumbered after cancellations). */
 export async function getJolpicaCalendar(year: number): Promise<JolpicaCalendarEntry[]> {
   const races = await getRaceCalendar(year);
-  return races.map((r) => ({
-    round: parseInt(r.round),
-    raceName: r.raceName,
-    circuitName: r.Circuit.circuitName,
-    date: r.date,
-  }));
+  return races.map(toCalendarEntry);
 }
 
 /**

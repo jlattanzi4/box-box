@@ -103,6 +103,11 @@ Create private leagues and share an invite code with friends. Each league has it
 
    Open [http://localhost:3000](http://localhost:3000).
 
+7. **Run the tests**
+   ```bash
+   npm test
+   ```
+
 ## Project Structure
 
 ```
@@ -177,7 +182,7 @@ Configured in `vercel.json`:
 
 | Job | Schedule | Purpose |
 |-----|----------|---------|
-| `/api/cron/update-results` | Mondays 10:00 UTC | Fetches race results and scores picks |
+| `/api/cron/update-results` | Daily 10:00 UTC | Syncs start times and pick deadlines with the official calendar, then fetches race results and scores picks |
 | `/api/cron/send-reminders` | Fri + Sat 12:00 UTC | Emails users who haven't picked |
 
 ## 2026 Season
