@@ -1,7 +1,7 @@
 import { RACE_CONTROL_POINTS } from "@/types";
-import type { ParsedRaceEvents } from "./openf1";
+import type { RaceControlTally } from "./race-control";
 
-export function calculateRaceControlScore(events: ParsedRaceEvents): number {
+export function calculateRaceControlScore(events: RaceControlTally): number {
   return (
     events.redFlags * RACE_CONTROL_POINTS.red_flag +
     events.safetyCars * RACE_CONTROL_POINTS.safety_car +

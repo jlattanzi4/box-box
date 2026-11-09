@@ -5,11 +5,8 @@ import {
   lookupJolpicaRound,
   type JolpicaCalendarEntry,
 } from "@/lib/jolpica";
-import {
-  getSessionKeyForRound,
-  getRaceControlEvents,
-  parseRaceControlEvents,
-} from "@/lib/openf1";
+import { getSessionKeyForRound, getRaceControlEvents } from "@/lib/openf1";
+import { tallyRaceControl } from "@/lib/race-control";
 import { calculateRaceControlScore, calculateTotalScore } from "@/lib/scoring";
 import { sendProcessingAlert } from "@/lib/email";
 
@@ -133,17 +130,18 @@ export async function processResults(opts: ProcessOptions = {}): Promise<Process
         });
       }
 
-      // 2. Race control events from OpenF1 (matched by date, tolerant of sprints)
+      // 2. Race control: flags, safety cars and penalties from OpenF1 (session
+      //    matched by date, tolerant of sprints); DNFs from Jolpica's classification
       let raceControlScore = 0;
       try {
         const sessionKey = await getSessionKeyForRound(race.seasonYear, race.raceDate);
         if (sessionKey) {
-          const parsed = parseRaceControlEvents(await getRaceControlEvents(sessionKey));
-          raceControlScore = calculateRaceControlScore(parsed);
+          const tally = tallyRaceControl(await getRaceControlEvents(sessionKey), jolpicaResults);
+          raceControlScore = calculateRaceControlScore(tally);
           await prisma.raceControlEvent.deleteMany({ where: { raceId: race.id } });
-          if (parsed.details.length > 0) {
+          if (tally.details.length > 0) {
             await prisma.raceControlEvent.createMany({
-              data: parsed.details.map((d) => ({
+              data: tally.details.map((d) => ({
                 raceId: race.id,
                 eventType: d.eventType,
                 description: d.description,

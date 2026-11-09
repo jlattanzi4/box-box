@@ -16,7 +16,7 @@ interface OpenF1Session {
   meeting_key: number;
 }
 
-interface OpenF1RaceControl {
+export interface OpenF1RaceControl {
   date: string;
   category: string;
   flag?: string;
@@ -51,62 +51,6 @@ export async function getRaceControlEvents(sessionKey: number) {
   return fetchOpenF1<OpenF1RaceControl>("/race_control", {
     session_key: sessionKey.toString(),
   });
-}
-
-export interface ParsedRaceEvents {
-  redFlags: number;
-  safetyCars: number;
-  vscs: number;
-  dnfs: number;
-  wet: boolean;
-  penalties: number;
-  details: { eventType: string; description: string }[];
-}
-
-export function parseRaceControlEvents(events: OpenF1RaceControl[]): ParsedRaceEvents {
-  let redFlags = 0;
-  let safetyCars = 0;
-  let vscs = 0;
-  let wet = false;
-  let penalties = 0;
-  const details: { eventType: string; description: string }[] = [];
-
-  for (const event of events) {
-    const msg = event.message.toUpperCase();
-
-    if (msg.includes("RED FLAG")) {
-      redFlags++;
-      details.push({ eventType: "red_flag", description: event.message });
-    } else if (msg.includes("VIRTUAL SAFETY CAR") || msg.includes("VSC")) {
-      // Only count VSC deployments, not endings
-      if (msg.includes("DEPLOYED") || msg.includes("VSC DEPLOYED") || (!msg.includes("ENDING") && !msg.includes("ENDED"))) {
-        vscs++;
-        details.push({ eventType: "vsc", description: event.message });
-      }
-    } else if (msg.includes("SAFETY CAR") && !msg.includes("VIRTUAL")) {
-      // Only count SC deployments, not endings
-      if (msg.includes("DEPLOYED") || msg.includes("IN THIS LAP") || (!msg.includes("ENDING") && !msg.includes("ENDED") && !msg.includes("IN"))) {
-        safetyCars++;
-        details.push({ eventType: "safety_car", description: event.message });
-      }
-    }
-
-    if (msg.includes("WET RACE") || msg.includes("WET DECLARED")) {
-      wet = true;
-      details.push({ eventType: "wet", description: event.message });
-    }
-
-    if (msg.includes("PENALTY") && (msg.includes("TIME") || msg.includes("GRID") || msg.includes("SECOND"))) {
-      penalties++;
-      details.push({ eventType: "penalty", description: event.message });
-    }
-
-    if (msg.includes("RETIRED") || msg.includes("STOPPED")) {
-      details.push({ eventType: "dnf", description: event.message });
-    }
-  }
-
-  return { redFlags, safetyCars, vscs, dnfs: details.filter(d => d.eventType === "dnf").length, wet, penalties, details };
 }
 
 /**
