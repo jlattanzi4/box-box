@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { hash } from "bcryptjs";
 import { prisma } from "@/lib/prisma";
+import { allow, clientAddress, LIMITS } from "@/lib/rate-limit";
 import { z } from "zod";
 
 const registerSchema = z.object({
@@ -10,6 +11,14 @@ const registerSchema = z.object({
 });
 
 export async function POST(req: Request) {
+  const verdict = await allow([`register:address:${clientAddress(req.headers)}`], LIMITS.register);
+  if (!verdict.allowed) {
+    return NextResponse.json(
+      { error: "Too many new accounts from this connection. Try again later." },
+      { status: 429, headers: { "Retry-After": String(verdict.retryAfterSeconds) } }
+    );
+  }
+
   try {
     const body = await req.json();
     const { name, email, password } = registerSchema.parse(body);

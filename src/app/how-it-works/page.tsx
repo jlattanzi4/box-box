@@ -1,5 +1,8 @@
+import type { Metadata } from "next";
 import { PageHeader } from "@/components/page-header";
 import { RACE_CONTROL_POINTS } from "@/types";
+
+export const metadata: Metadata = { title: "How it works", description: "The rules of Box Box: one pick a race, every driver once, every constructor twice, and two bets on chaos." };
 
 const DRIVER_POINTS = [25, 18, 15, 12, 10, 8, 6, 4, 2, 1];
 
@@ -57,7 +60,7 @@ export default function HowItWorksPage() {
         <Board title="Driver + constructor" eyebrow="Scoring">
           <div className="px-5 py-4 space-y-3">
             <p className="text-sm text-chalk-dim">
-              Your driver scores exactly what they score in the real championship.
+              Your driver scores what they score in the Grand Prix. Sprint races don&apos;t count.
             </p>
             <ol className="grid grid-cols-5 sm:grid-cols-10 gap-1.5">
               {DRIVER_POINTS.map((pts, i) => (

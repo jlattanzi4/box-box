@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { allow, LIMITS } from "@/lib/rate-limit";
 import { z } from "zod";
 
 const joinSchema = z.object({
@@ -11,6 +12,15 @@ export async function POST(req: Request) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  // Invite codes are short. This stops one account from guessing its way in.
+  const verdict = await allow([`join:member:${session.user.id}`], LIMITS.join);
+  if (!verdict.allowed) {
+    return NextResponse.json(
+      { error: "Too many invite codes tried. Try again later." },
+      { status: 429, headers: { "Retry-After": String(verdict.retryAfterSeconds) } }
+    );
   }
 
   try {

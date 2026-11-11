@@ -24,9 +24,20 @@ const mono = JetBrains_Mono({
   weight: ["400", "600", "700"],
 });
 
+const DESCRIPTION = "Fantasy F1 for your group chat. One pick a race, every driver once, scored from the real results.";
+
 export const metadata: Metadata = {
-  title: "Box Box",
-  description: "Fantasy F1 for your group chat. One pick a race, every driver once.",
+  metadataBase: new URL("https://box-box-f1.vercel.app"),
+  title: { default: "Box Box · Fantasy F1 for your group chat", template: "%s · Box Box" },
+  description: DESCRIPTION,
+  openGraph: {
+    type: "website",
+    siteName: "Box Box",
+    title: "Box Box · Fantasy F1 for your group chat",
+    description: DESCRIPTION,
+    url: "/",
+  },
+  twitter: { card: "summary_large_image" },
 };
 
 export const viewport: Viewport = {

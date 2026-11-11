@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -5,6 +6,8 @@ import { playerCodes } from "@/lib/player-code";
 import { PageHeader } from "@/components/page-header";
 import { LeagueNav } from "@/components/league-nav";
 import { PickChip } from "@/components/pick-chip";
+
+export const metadata: Metadata = { title: "Pick history" };
 
 export default async function HistoryPage({ params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
