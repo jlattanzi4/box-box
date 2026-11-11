@@ -22,6 +22,29 @@ export interface LeagueStandings {
   racesScored: number;
 }
 
+export interface LiveryPick {
+  userId: string;
+  /** null for a Race Control pick. */
+  constructorJolpicaId: string | null;
+  race: { round: number; pickDeadline: Date; status: string };
+}
+
+/**
+ * The team colour beside each member: the constructor of their most recent
+ * pick that has locked. A pick for a race that hasn't started is still secret,
+ * and its colour would give it away, so it doesn't count yet. Picks on
+ * cancelled races never count.
+ */
+export function liveryByUser(picks: LiveryPick[], now: Date): Map<string, string | null> {
+  const latest = new Map<string, LiveryPick>();
+  for (const pick of picks) {
+    if (pick.race.status === "cancelled" || pick.race.pickDeadline > now) continue;
+    const current = latest.get(pick.userId);
+    if (!current || pick.race.round > current.race.round) latest.set(pick.userId, pick);
+  }
+  return new Map([...latest].map(([userId, pick]) => [userId, pick.constructorJolpicaId]));
+}
+
 /**
  * Season standings for a league, ordered like a timing tower: leader first,
  * gap to leader on every row, last-round delta, and a livery colour from the
@@ -54,12 +77,9 @@ export async function getLeagueStandings(leagueId: string): Promise<LeagueStandi
       })
     : [];
 
-  // Latest pick per member (for the livery stripe)
-  const latestPicks = await prisma.pick.findMany({
-    where: { leagueId },
-    orderBy: { race: { round: "desc" } },
-    include: { constructor: true },
-    distinct: ["userId"],
+  const leaguePicks = await prisma.pick.findMany({
+    where: { leagueId, race: { seasonYear: league.seasonYear } },
+    include: { constructor: true, race: true },
   });
 
   const racesScored = await prisma.race.count({
@@ -68,8 +88,14 @@ export async function getLeagueStandings(leagueId: string): Promise<LeagueStandi
 
   const totalMap = new Map(totals.map((t) => [t.userId, t._sum.totalPoints ?? 0]));
   const lastMap = new Map(lastScores.map((s) => [s.userId, s.totalPoints]));
-  const liveryMap = new Map(
-    latestPicks.map((p) => [p.userId, (p.constructor as { jolpicaId?: string } | null)?.jolpicaId ?? null])
+  const liveryMap = liveryByUser(
+    leaguePicks.map((p) => ({
+      userId: p.userId,
+      // "constructor" collides with Object.prototype in Prisma's types
+      constructorJolpicaId: (p.constructor as unknown as { jolpicaId: string } | null)?.jolpicaId ?? null,
+      race: p.race,
+    })),
+    new Date()
   );
   const codes = playerCodes(league.members.map((m) => ({ id: m.userId, name: m.user.name })));
 
