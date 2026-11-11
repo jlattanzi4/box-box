@@ -78,7 +78,7 @@ model Race {
   country      String
   raceDate     DateTime
   pickDeadline DateTime           // same as raceDate (locks at race start)
-  status       String             @default("upcoming") // "upcoming" | "completed"
+  status       String             @default("upcoming") // "upcoming" | "completed" | "cancelled"
   picks        Pick[]
   results      RaceResult[]
   events       RaceControlEvent[]
@@ -150,4 +150,29 @@ model Score {
   constructorPoints  Float  @default(0)
   raceControlPoints  Float  @default(0)
   totalPoints        Float  @default(0)
+}
+
+// ─── Operations ─────────────────────────────────────────────────
+
+/// One row per run of a scheduled job, so "did it run, and what did it do?"
+/// has an answer that outlives the host's log retention.
+model CronRun {
+  id         String   @id @default(cuid())
+  job        String   // "update-results"
+  trigger    String   // "cron" | "manual"
+  startedAt  DateTime
+  finishedAt DateTime @default(now())
+  ok         Boolean
+  summary    Json
+
+  @@index([job, startedAt])
+}
+
+/// Attempt counters for sign-in, registration and league joins. One row per
+/// thing being limited (an address, an email, a member), reset when its
+/// window ends.
+model RateLimit {
+  key     String   @id // e.g. "login:email:ana@example.com"
+  count   Int
+  resetAt DateTime
 }

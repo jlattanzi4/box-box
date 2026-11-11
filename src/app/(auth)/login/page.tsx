@@ -22,7 +22,9 @@ export default function LoginPage() {
     setLoading(true);
     const result = await signIn("credentials", { email, password, redirect: false });
     setLoading(false);
-    if (result?.error) {
+    if (result?.code === "too_many_attempts") {
+      setError("Too many attempts. Wait a few minutes and try again.");
+    } else if (result?.error) {
       setError("That email and password don't match.");
     } else {
       router.push("/dashboard");

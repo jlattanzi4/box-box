@@ -1,7 +1,13 @@
-import NextAuth from "next-auth";
+import NextAuth, { CredentialsSignin } from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import { compare } from "bcryptjs";
 import { prisma } from "./prisma";
+import { allow, clientAddress, LIMITS } from "./rate-limit";
+
+/** Too many sign-in attempts. The login page reads the code to say so. */
+class TooManyAttempts extends CredentialsSignin {
+  code = "too_many_attempts";
+}
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
   providers: [
@@ -11,8 +17,16 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         email: { label: "Email", type: "email" },
         password: { label: "Password", type: "password" },
       },
-      async authorize(credentials) {
+      async authorize(credentials, request) {
         if (!credentials?.email || !credentials?.password) return null;
+
+        // Counted before the password is checked, so guessing is what's limited.
+        const email = (credentials.email as string).trim().toLowerCase();
+        const verdict = await allow(
+          [`login:email:${email}`, `login:address:${clientAddress(request.headers)}`],
+          LIMITS.login
+        );
+        if (!verdict.allowed) throw new TooManyAttempts();
 
         const user = await prisma.user.findUnique({
           where: { email: credentials.email as string },
