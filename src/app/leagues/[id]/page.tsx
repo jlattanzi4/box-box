@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { auth } from "@/lib/auth";
@@ -11,6 +12,8 @@ import { Countdown } from "@/components/countdown";
 import { LocalTime } from "@/components/local-time";
 import { PickChip } from "@/components/pick-chip";
 import { TimingTower } from "@/components/timing-tower";
+
+export const metadata: Metadata = { title: "Standings" };
 
 export default async function LeaguePage({ params }: { params: Promise<{ id: string }> }) {
   const session = await auth();

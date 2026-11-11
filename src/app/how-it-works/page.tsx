@@ -1,5 +1,8 @@
+import type { Metadata } from "next";
 import { PageHeader } from "@/components/page-header";
 import { RACE_CONTROL_POINTS } from "@/types";
+
+export const metadata: Metadata = { title: "How it works", description: "The rules of Box Box: one pick a race, every driver once, every constructor twice, and two bets on chaos." };
 
 const DRIVER_POINTS = [25, 18, 15, 12, 10, 8, 6, 4, 2, 1];
 

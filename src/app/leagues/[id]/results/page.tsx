@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -6,6 +7,8 @@ import { PageHeader } from "@/components/page-header";
 import { LeagueNav } from "@/components/league-nav";
 import { PickChip } from "@/components/pick-chip";
 import { RACE_CONTROL_POINTS } from "@/types";
+
+export const metadata: Metadata = { title: "Results" };
 
 const EVENT_STYLE: Record<string, { label: string; color: string }> = {
   red_flag: { label: "Red flag", color: "var(--kerb-red)" },
