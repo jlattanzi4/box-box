@@ -2,6 +2,37 @@ import { prisma } from "./prisma";
 import { MAX_CONSTRUCTOR_USES, MAX_RACE_CONTROL_PICKS, SEASON_YEAR } from "@/types";
 import type { PickConstraints } from "@/types";
 
+export interface UsagePick {
+  pickType: string;
+  driverId: string | null;
+  constructorId: string | null;
+  race: { status: string };
+}
+
+/**
+ * What a member has spent so far this season. A pick on a cancelled race is
+ * not spent: the race never ran, so it shouldn't cost a driver, a constructor
+ * use or a Race Control pick.
+ */
+export function tallyUsage(picks: UsagePick[]) {
+  const usedDriverIds: string[] = [];
+  const usedConstructorCounts: Record<string, number> = {};
+  let raceControlCount = 0;
+
+  for (const pick of picks) {
+    if (pick.race.status === "cancelled") continue;
+    if (pick.pickType === "race_control") {
+      raceControlCount++;
+    } else {
+      if (pick.driverId) usedDriverIds.push(pick.driverId);
+      if (pick.constructorId) {
+        usedConstructorCounts[pick.constructorId] = (usedConstructorCounts[pick.constructorId] || 0) + 1;
+      }
+    }
+  }
+  return { usedDriverIds, usedConstructorCounts, raceControlCount };
+}
+
 export async function getPickConstraints(
   userId: string,
   leagueId: string,
@@ -16,24 +47,11 @@ export async function getPickConstraints(
       race: { seasonYear },
       ...(excludeRaceId ? { raceId: { not: excludeRaceId } } : {}),
     },
-    include: { driver: true, constructor: true },
+    // "constructor" has to be named: it collides with Object.prototype in Prisma's types
+    include: { race: true, constructor: false },
   });
 
-  const usedDriverIds: string[] = [];
-  const usedConstructorCounts: Record<string, number> = {};
-  let raceControlCount = 0;
-
-  for (const pick of existingPicks) {
-    if (pick.pickType === "race_control") {
-      raceControlCount++;
-    } else {
-      if (pick.driverId) usedDriverIds.push(pick.driverId);
-      if (pick.constructorId) {
-        usedConstructorCounts[pick.constructorId] =
-          (usedConstructorCounts[pick.constructorId] || 0) + 1;
-      }
-    }
-  }
+  const { usedDriverIds, usedConstructorCounts, raceControlCount } = tallyUsage(existingPicks);
 
   // Get all drivers and constructors
   const allDrivers = await prisma.driver.findMany({
