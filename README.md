@@ -13,7 +13,7 @@ Box Box is a private-league F1 fantasy game built for the 2026 season. Each race
 - Picks lock at race start — no changes once lights go out
 
 ### Scoring
-**Driver + Constructor picks** earn points based on real race finishing positions (via Jolpica F1 API).
+**Driver + Constructor picks** earn the points scored in the Grand Prix (via Jolpica F1 API): your driver's own, plus both cars of your constructor. Sprint races don't count.
 
 **Race Control picks** earn points from events during the race (via OpenF1 API):
 
@@ -39,7 +39,7 @@ Create private leagues and share an invite code with friends. Each league has it
 | ORM | [Prisma 7](https://prisma.io) with `@prisma/adapter-pg` |
 | Auth | [NextAuth v5](https://authjs.dev) (credentials) |
 | Styling | [Tailwind CSS v4](https://tailwindcss.com) + [shadcn/ui](https://ui.shadcn.com) |
-| Email | [Resend](https://resend.com) (pick reminders) |
+| Email | [Resend](https://resend.com) (alerts to admins when a race can't be scored) |
 | F1 Data | [Jolpica API](https://github.com/jolpica/jolpica-f1) + [OpenF1 API](https://openf1.org) |
 | Hosting | [Vercel](https://vercel.com) |
 
@@ -50,14 +50,14 @@ Create private leagues and share an invite code with friends. Each league has it
 - **Smart pick page** — auto-selects the next upcoming race, shows remaining drivers/constructors with team-color indicators
 - **Live constraints** — tracks which drivers and constructors you've already used, prevents invalid picks
 - **Race Control mode** — opt out of a driver pick and bet on chaos instead
-- **Auto-scoring** — Vercel cron job fetches real race results and scores all picks automatically
-- **Email reminders** — notifies league members who haven't picked the day before a race
+- **Auto-scoring** — a daily Vercel cron job fetches real race results and scores all picks. A race is scored only once the results and the race-control feed are both in, and is never cancelled because a request failed
+- **Attempt limits** — sign-in, registration and invite-code attempts are rate limited
 - **Responsive** — works on mobile, tablet, and desktop
 
 ## Getting Started
 
 ### Prerequisites
-- Node.js 18+
+- Node.js 20.9 or newer (what Next.js 16 requires)
 - PostgreSQL database (recommend [Neon](https://neon.tech) free tier)
 
 ### Setup
@@ -83,7 +83,8 @@ Create private leagues and share an invite code with friends. Each league has it
    NEXTAUTH_SECRET="generate-with: openssl rand -base64 32"
    NEXTAUTH_URL="http://localhost:3000"
    CRON_SECRET="any-random-secret"
-   RESEND_API_KEY="optional-for-email-reminders"
+   RESEND_API_KEY="optional: emails an admin when a race can't be scored"
+   ADMIN_EMAIL="optional: who gets that email"
    ```
 
 4. **Set up the database**
@@ -103,10 +104,11 @@ Create private leagues and share an invite code with friends. Each league has it
 
    Open [http://localhost:3000](http://localhost:3000).
 
-7. **Run the tests**
+7. **Run the checks**
    ```bash
-   npm test
+   npm run lint && npm run typecheck && npm test
    ```
+   The tests need no database: the ones that use Postgres run it in process.
 
 ## Project Structure
 
@@ -128,17 +130,22 @@ src/
 │       ├── picks/                  # CRUD for picks
 │       ├── leagues/                # League management
 │       └── cron/
-│           ├── update-results/     # Auto-scoring cron
-│           └── send-reminders/     # Email reminder cron
+│           └── update-results/     # Auto-scoring cron
 ├── lib/
 │   ├── auth.ts                     # NextAuth config
 │   ├── prisma.ts                   # Database client
 │   ├── team-colors.ts              # F1 team color map
 │   ├── constraints.ts              # Pick validation logic
 │   ├── scoring.ts                  # Points calculation
+│   ├── results-plan.ts             # Decides whether a race can be scored, must wait, or is cancelled
+│   ├── process-results.ts          # Fetches results, scores picks
+│   ├── race-control.ts             # Tallies flags, safety cars, penalties, DNFs
+│   ├── schedule-sync.ts            # Keeps start times in line with the official calendar
+│   ├── standings.ts                # League table
+│   ├── rate-limit.ts               # Attempt limits
 │   ├── jolpica.ts                  # Race results API
 │   ├── openf1.ts                   # Race events API
-│   └── email.ts                    # Resend integration
+│   └── email.ts                    # Resend integration (admin alerts)
 ├── components/
 │   ├── navbar.tsx
 │   └── ui/                         # shadcn/ui components
@@ -172,6 +179,29 @@ races renumbering the season and circuit-name spelling differences no longer
 matter. Drivers that appear in results but not in the DB (stand-ins) are
 created automatically so constructor totals stay correct.
 
+### When a race won't score
+
+A race stays unscored, and is retried on every run, until the official
+results and OpenF1's race-control feed are both available. After two days an
+admin is emailed. If the race-control data is never coming, score the race
+without it (Race Control picks then count retirements only):
+
+```bash
+curl -X POST https://<your-domain>/api/cron/update-results \
+  -H "Authorization: Bearer $CRON_SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{"raceIds":["<race id>"],"allowMissingRaceControl":true}'
+```
+
+### Did the cron run?
+
+Every run is recorded in the database, because the host keeps function logs
+for only an hour:
+
+```bash
+npx tsx --env-file=.env scripts/cron-runs.ts      # the last 10 runs and what each did
+```
+
 ## Deployment
 
 The app is deployed on Vercel. Pushes to `main` auto-deploy.
@@ -183,7 +213,13 @@ Configured in `vercel.json`:
 | Job | Schedule | Purpose |
 |-----|----------|---------|
 | `/api/cron/update-results` | Daily 10:00 UTC | Syncs start times and pick deadlines with the official calendar, then fetches race results and scores picks |
-| `/api/cron/send-reminders` | Fri + Sat 12:00 UTC | Emails users who haven't picked |
+
+Schema changes ship as Prisma migrations. Apply them to the production database
+before the code that needs them goes live:
+
+```bash
+npx prisma migrate deploy
+```
 
 ## 2026 Season
 
@@ -195,4 +231,4 @@ Box Box is configured for the 2026 F1 season:
 
 ## License
 
-MIT
+MIT. See [LICENSE](LICENSE).
