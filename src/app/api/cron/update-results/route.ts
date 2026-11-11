@@ -21,11 +21,13 @@ export async function GET(req: Request) {
 // Manual trigger. Optional JSON body:
 //   { "raceIds": ["..."], "force": true }  — reprocess specific races even if
 //   they are already marked completed/cancelled.
+//   { "raceIds": ["..."], "allowMissingRaceControl": true }  — score a race
+//   OpenF1 never published race-control data for.
 export async function POST(req: Request) {
   if (!authorised(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  let body: { raceIds?: string[]; force?: boolean } = {};
+  let body: { raceIds?: string[]; force?: boolean; allowMissingRaceControl?: boolean } = {};
   try {
     body = await req.json();
   } catch {
@@ -34,7 +36,7 @@ export async function POST(req: Request) {
   return run(body);
 }
 
-async function run(opts: { raceIds?: string[]; force?: boolean } = {}) {
+async function run(opts: { raceIds?: string[]; force?: boolean; allowMissingRaceControl?: boolean } = {}) {
   // A Jolpica outage must not block scoring, so the sync fails on its own.
   let schedule: SchedulePlan | { error: string };
   try {

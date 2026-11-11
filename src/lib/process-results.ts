@@ -7,22 +7,23 @@ import {
 } from "@/lib/jolpica";
 import { getSessionKeyForRound, getRaceControlEvents } from "@/lib/openf1";
 import { tallyRaceControl } from "@/lib/race-control";
-import { calculateRaceControlScore, calculateTotalScore } from "@/lib/scoring";
+import { planRace, scorePicks, type RaceFacts } from "@/lib/results-plan";
+import { calculateRaceControlScore } from "@/lib/scoring";
 import { sendProcessingAlert } from "@/lib/email";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-// A race with NO entry on the official calendar and no results after this
-// long is assumed cancelled. Races that ARE on the calendar are never
-// auto-cancelled — they just keep retrying and alerting.
-const STALE_THRESHOLD_MS = 5 * DAY_MS;
-// Races still unscored after this long trigger an admin alert.
-const ALERT_THRESHOLD_MS = 2 * DAY_MS;
 
 export interface ProcessOptions {
   /** Only process these race ids (default: every overdue "upcoming" race). */
   raceIds?: string[];
   /** Reprocess even if the race is already marked completed/cancelled. */
   force?: boolean;
+  /**
+   * Score even if OpenF1 has no race-control data. Race Control picks then
+   * score retirements only, which come from the official classification.
+   * For a manual run, once it's clear the data isn't coming.
+   */
+  allowMissingRaceControl?: boolean;
   /** Skip the admin alert email (useful for manual runs). */
   silent?: boolean;
 }
@@ -30,9 +31,45 @@ export interface ProcessOptions {
 export interface ProcessSummary {
   message: string;
   races: string[];
+  /** Races left for the next run, each with the reason. */
+  waiting: string[];
   autoCancelled: string[];
   stuckRaces: string[];
   errors: string[];
+}
+
+const liveSources = { getRaceResults, getSessionKeyForRound, getRaceControlEvents };
+
+/**
+ * Asks the calendar, the classification and race control about one race.
+ * `sources` are the network calls, passed in so the failure cases can be tested.
+ */
+export async function gatherFacts(
+  race: { seasonYear: number; raceDate: Date; circuitName: string },
+  calendar: JolpicaCalendarEntry[] | null,
+  label: string,
+  sources: typeof liveSources = liveSources
+): Promise<RaceFacts> {
+  if (calendar === null) return { onCalendar: null, results: [], raceControl: null };
+
+  // Jolpica renumbers rounds after cancellations, so the race is found on the
+  // live calendar by date, never by our own round number.
+  const entry = lookupJolpicaRound(calendar, race);
+  if (!entry) return { onCalendar: false, results: [], raceControl: null };
+
+  const results = await sources.getRaceResults(race.seasonYear, entry.round);
+  if (results.length === 0) return { onCalendar: true, results, raceControl: null };
+
+  // The session is matched by date, so a sprint the day before isn't mistaken for the race.
+  try {
+    const sessionKey = await sources.getSessionKeyForRound(race.seasonYear, race.raceDate);
+    if (sessionKey === null) console.warn(`${label}: OpenF1 has no race session for this date`);
+    const raceControl = sessionKey === null ? null : await sources.getRaceControlEvents(sessionKey);
+    return { onCalendar: true, results, raceControl };
+  } catch (e) {
+    console.error(`${label}: failed to fetch race control events:`, e);
+    return { onCalendar: true, results, raceControl: null };
+  }
 }
 
 export async function processResults(opts: ProcessOptions = {}): Promise<ProcessSummary> {
@@ -46,22 +83,23 @@ export async function processResults(opts: ProcessOptions = {}): Promise<Process
   });
 
   if (races.length === 0) {
-    return { message: "No races to process.", races: [], autoCancelled: [], stuckRaces: [], errors: [] };
+    return { message: "No races to process.", races: [], waiting: [], autoCancelled: [], stuckRaces: [], errors: [] };
   }
 
-  // Jolpica renumbers rounds after cancellations, so resolve each of our races
-  // against the live calendar (by date) rather than trusting our round number.
-  const calendars = new Map<number, JolpicaCalendarEntry[]>();
+  // null marks a calendar that couldn't be fetched, which is not the same as
+  // an empty one: only a calendar we actually have can show a race is gone.
+  const calendars = new Map<number, JolpicaCalendarEntry[] | null>();
   for (const year of new Set(races.map((r) => r.seasonYear))) {
     try {
       calendars.set(year, await getJolpicaCalendar(year));
     } catch (e) {
       console.error(`Failed to fetch Jolpica calendar for ${year}:`, e);
-      calendars.set(year, []);
+      calendars.set(year, null);
     }
   }
 
   const processed: string[] = [];
+  const waiting: string[] = [];
   const autoCancelled: string[] = [];
   const errors: string[] = [];
   const stuckRaces: { round: number; name: string; daysOverdue: number }[] = [];
@@ -70,32 +108,27 @@ export async function processResults(opts: ProcessOptions = {}): Promise<Process
   for (const race of races) {
     const label = `Round ${race.round}: ${race.name}`;
     try {
-      const entry = lookupJolpicaRound(calendars.get(race.seasonYear) ?? [], race);
-      const msSinceRace = now.getTime() - race.raceDate.getTime();
+      const facts = await gatherFacts(race, calendars.get(race.seasonYear) ?? null, label);
+      const action = planRace(race, facts, now, opts);
 
-      if (!entry) {
-        console.warn(`${label}: no matching race on the Jolpica calendar`);
-        if (msSinceRace > STALE_THRESHOLD_MS && !opts.force) {
-          await prisma.race.update({ where: { id: race.id }, data: { status: "cancelled" } });
-          autoCancelled.push(label);
-          cancelledDetails.push({ round: race.round, name: race.name });
-        } else if (msSinceRace > ALERT_THRESHOLD_MS) {
-          stuckRaces.push({ round: race.round, name: race.name, daysOverdue: Math.floor(msSinceRace / DAY_MS) });
+      if (action.kind === "wait") {
+        console.warn(`${label}: ${action.reason}; will retry`);
+        waiting.push(`${label}: ${action.reason}`);
+        if (action.alert) {
+          const daysOverdue = Math.floor((now.getTime() - race.raceDate.getTime()) / DAY_MS);
+          stuckRaces.push({ round: race.round, name: race.name, daysOverdue });
         }
         continue;
       }
-
-      const jolpicaResults = await getRaceResults(race.seasonYear, entry.round);
-      if (jolpicaResults.length === 0) {
-        // On the calendar but not yet published — never cancel, just wait/alert.
-        if (msSinceRace > ALERT_THRESHOLD_MS) {
-          stuckRaces.push({ round: race.round, name: race.name, daysOverdue: Math.floor(msSinceRace / DAY_MS) });
-        }
+      if (action.kind === "cancel") {
+        await prisma.race.update({ where: { id: race.id }, data: { status: "cancelled" } });
+        autoCancelled.push(label);
+        cancelledDetails.push({ round: race.round, name: race.name });
         continue;
       }
 
       // 1. Save race results
-      for (const result of jolpicaResults) {
+      for (const result of action.results) {
         const constructor = await prisma.constructor.findUnique({ where: { jolpicaId: result.Constructor.constructorId } });
         if (!constructor) {
           console.warn(`${label}: unknown constructor ${result.Constructor.constructorId}, skipping ${result.Driver.driverId}`);
@@ -130,48 +163,30 @@ export async function processResults(opts: ProcessOptions = {}): Promise<Process
         });
       }
 
-      // 2. Race control: flags, safety cars and penalties from OpenF1 (session
-      //    matched by date, tolerant of sprints); DNFs from Jolpica's classification
-      let raceControlScore = 0;
-      try {
-        const sessionKey = await getSessionKeyForRound(race.seasonYear, race.raceDate);
-        if (sessionKey) {
-          const tally = tallyRaceControl(await getRaceControlEvents(sessionKey), jolpicaResults);
-          raceControlScore = calculateRaceControlScore(tally);
-          await prisma.raceControlEvent.deleteMany({ where: { raceId: race.id } });
-          if (tally.details.length > 0) {
-            await prisma.raceControlEvent.createMany({
-              data: tally.details.map((d) => ({
-                raceId: race.id,
-                eventType: d.eventType,
-                description: d.description,
-                source: "api",
-              })),
-            });
-          }
-        }
-      } catch (e) {
-        console.error(`${label}: failed to fetch race control events:`, e);
+      // 2. Race control: flags, safety cars and penalties from OpenF1; DNFs
+      //    from the official classification.
+      const tally = tallyRaceControl(action.raceControl ?? [], action.results);
+      const raceControlScore = calculateRaceControlScore(tally);
+      await prisma.raceControlEvent.deleteMany({ where: { raceId: race.id } });
+      if (tally.details.length > 0) {
+        await prisma.raceControlEvent.createMany({
+          data: tally.details.map((d) => ({
+            raceId: race.id,
+            eventType: d.eventType,
+            description: d.description,
+            source: "api",
+          })),
+        });
       }
 
       // 3. Score every pick for this race
       const picks = await prisma.pick.findMany({ where: { raceId: race.id } });
       const results = await prisma.raceResult.findMany({ where: { raceId: race.id } });
-
-      for (const pick of picks) {
-        let driverPoints = 0;
-        let constructorPoints = 0;
-        if (pick.pickType === "driver_constructor") {
-          driverPoints = results.find((r) => r.driverId === pick.driverId)?.points ?? 0;
-          constructorPoints = results
-            .filter((r) => r.constructorId === pick.constructorId)
-            .reduce((sum, r) => sum + r.points, 0);
-        }
-        const score = calculateTotalScore(pick.pickType, driverPoints, constructorPoints, raceControlScore);
+      for (const { pickId, userId, leagueId, ...score } of scorePicks(picks, results, raceControlScore)) {
         await prisma.score.upsert({
-          where: { pickId: pick.id },
+          where: { pickId },
           update: score,
-          create: { pickId: pick.id, raceId: race.id, userId: pick.userId, leagueId: pick.leagueId, ...score },
+          create: { pickId, raceId: race.id, userId, leagueId, ...score },
         });
       }
 
@@ -201,6 +216,7 @@ export async function processResults(opts: ProcessOptions = {}): Promise<Process
   return {
     message: `Processed ${processed.length} race(s).`,
     races: processed,
+    waiting,
     autoCancelled,
     stuckRaces: stuckRaces.map((r) => `Round ${r.round}: ${r.name}`),
     errors,
