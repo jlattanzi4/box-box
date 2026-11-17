@@ -1,4 +1,4 @@
-// OpenF1 API client — race control events
+// OpenF1 API client: race control events and tyre stints
 // Docs: https://openf1.org/
 // Rate limit: 3 req/s, 30/min
 
@@ -27,6 +27,16 @@ export interface OpenF1RaceControl {
   sector?: number;
 }
 
+// One stint per car between pit stops. The compound is SOFT, MEDIUM, HARD,
+// INTERMEDIATE or WET (null when OpenF1 doesn't know it).
+export interface OpenF1Stint {
+  driver_number: number;
+  stint_number: number;
+  compound: string | null;
+  lap_start: number | null;
+  lap_end: number | null;
+}
+
 async function fetchOpenF1<T>(path: string, params: Record<string, string> = {}): Promise<T[]> {
   const url = new URL(`${BASE_URL}${path}`);
   Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
@@ -49,6 +59,12 @@ export async function getRaceSessions(year: number) {
 
 export async function getRaceControlEvents(sessionKey: number) {
   return fetchOpenF1<OpenF1RaceControl>("/race_control", {
+    session_key: sessionKey.toString(),
+  });
+}
+
+export async function getStints(sessionKey: number) {
+  return fetchOpenF1<OpenF1Stint>("/stints", {
     session_key: sessionKey.toString(),
   });
 }

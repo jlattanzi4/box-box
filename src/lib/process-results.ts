@@ -5,7 +5,7 @@ import {
   lookupJolpicaRound,
   type JolpicaCalendarEntry,
 } from "@/lib/jolpica";
-import { getSessionKeyForRound, getRaceControlEvents } from "@/lib/openf1";
+import { getSessionKeyForRound, getRaceControlEvents, getStints } from "@/lib/openf1";
 import { tallyRaceControl } from "@/lib/race-control";
 import { planRace, scorePicks, type RaceFacts } from "@/lib/results-plan";
 import { calculateRaceControlScore } from "@/lib/scoring";
@@ -38,10 +38,10 @@ export interface ProcessSummary {
   errors: string[];
 }
 
-const liveSources = { getRaceResults, getSessionKeyForRound, getRaceControlEvents };
+const liveSources = { getRaceResults, getSessionKeyForRound, getRaceControlEvents, getStints };
 
 /**
- * Asks the calendar, the classification and race control about one race.
+ * Asks the calendar, the classification, race control and the tyre stints about one race.
  * `sources` are the network calls, passed in so the failure cases can be tested.
  */
 export async function gatherFacts(
@@ -50,25 +50,30 @@ export async function gatherFacts(
   label: string,
   sources: typeof liveSources = liveSources
 ): Promise<RaceFacts> {
-  if (calendar === null) return { onCalendar: null, results: [], raceControl: null };
+  const none = { raceControl: null, stints: null };
+  if (calendar === null) return { onCalendar: null, results: [], ...none };
 
   // Jolpica renumbers rounds after cancellations, so the race is found on the
   // live calendar by date, never by our own round number.
   const entry = lookupJolpicaRound(calendar, race);
-  if (!entry) return { onCalendar: false, results: [], raceControl: null };
+  if (!entry) return { onCalendar: false, results: [], ...none };
 
   const results = await sources.getRaceResults(race.seasonYear, entry.round);
-  if (results.length === 0) return { onCalendar: true, results, raceControl: null };
+  if (results.length === 0) return { onCalendar: true, results, ...none };
 
   // The session is matched by date, so a sprint the day before isn't mistaken for the race.
   try {
     const sessionKey = await sources.getSessionKeyForRound(race.seasonYear, race.raceDate);
-    if (sessionKey === null) console.warn(`${label}: OpenF1 has no race session for this date`);
-    const raceControl = sessionKey === null ? null : await sources.getRaceControlEvents(sessionKey);
-    return { onCalendar: true, results, raceControl };
+    if (sessionKey === null) {
+      console.warn(`${label}: OpenF1 has no race session for this date`);
+      return { onCalendar: true, results, ...none };
+    }
+    // Both or neither: without the stints, a wet race would be scored as dry for good.
+    const [raceControl, stints] = await Promise.all([sources.getRaceControlEvents(sessionKey), sources.getStints(sessionKey)]);
+    return { onCalendar: true, results, raceControl, stints };
   } catch (e) {
-    console.error(`${label}: failed to fetch race control events:`, e);
-    return { onCalendar: true, results, raceControl: null };
+    console.error(`${label}: failed to fetch race control events or stints:`, e);
+    return { onCalendar: true, results, ...none };
   }
 }
 
@@ -163,9 +168,9 @@ export async function processResults(opts: ProcessOptions = {}): Promise<Process
         });
       }
 
-      // 2. Race control: flags, safety cars and penalties from OpenF1; DNFs
-      //    from the official classification.
-      const tally = tallyRaceControl(action.raceControl ?? [], action.results);
+      // 2. Race control: flags, safety cars and penalties from OpenF1; wet
+      //    from the tyres; DNFs from the official classification.
+      const tally = tallyRaceControl(action.raceControl ?? [], action.results, action.stints ?? []);
       const raceControlScore = calculateRaceControlScore(tally);
       await prisma.raceControlEvent.deleteMany({ where: { raceId: race.id } });
       if (tally.details.length > 0) {

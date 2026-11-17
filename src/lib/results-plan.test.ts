@@ -10,12 +10,13 @@ const facts = (over: Partial<RaceFacts> = {}): RaceFacts => ({
   onCalendar: true,
   results: RESULTS,
   raceControl: [],
+  stints: [],
   ...over,
 });
 
 describe("planRace", () => {
   it("scores a race once results and race-control data are both in", () => {
-    expect(planRace(RACE, facts(), daysLater(1))).toEqual({ kind: "score", results: RESULTS, raceControl: [] });
+    expect(planRace(RACE, facts(), daysLater(1))).toEqual({ kind: "score", results: RESULTS, raceControl: [], stints: [] });
   });
 
   it("never cancels a race because the calendar couldn't be fetched", () => {
@@ -48,7 +49,7 @@ describe("planRace", () => {
 
   it("does not complete a race without race-control data", () => {
     // Completing it would leave every Race Control pick on zero, with no retry.
-    const action = planRace(RACE, facts({ raceControl: null }), daysLater(1));
+    const action = planRace(RACE, facts({ raceControl: null, stints: null }), daysLater(1));
     expect(action).toEqual({ kind: "wait", reason: "race-control data isn't available", alert: false });
   });
 
@@ -57,8 +58,8 @@ describe("planRace", () => {
   });
 
   it("can be told to score without race-control data on a manual run", () => {
-    const action = planRace(RACE, facts({ raceControl: null }), daysLater(9), { allowMissingRaceControl: true });
-    expect(action).toEqual({ kind: "score", results: RESULTS, raceControl: null });
+    const action = planRace(RACE, facts({ raceControl: null, stints: null }), daysLater(9), { allowMissingRaceControl: true });
+    expect(action).toEqual({ kind: "score", results: RESULTS, raceControl: null, stints: null });
   });
 });
 
