@@ -1,5 +1,5 @@
 import type { JolpicaResult } from "@/lib/jolpica";
-import type { OpenF1RaceControl } from "@/lib/openf1";
+import type { OpenF1RaceControl, OpenF1Stint } from "@/lib/openf1";
 import { calculateTotalScore } from "@/lib/scoring";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -22,6 +22,8 @@ export interface RaceFacts {
   results: JolpicaResult[];
   /** Race-control messages; null when OpenF1 failed or has no session for this race. */
   raceControl: OpenF1RaceControl[] | null;
+  /** Tyre stints, which say whether the race was wet; null exactly when raceControl is. */
+  stints: OpenF1Stint[] | null;
 }
 
 export interface PlanOptions {
@@ -35,7 +37,7 @@ export type RaceAction =
   /** Leave the race as it is and try again on the next run. */
   | { kind: "wait"; reason: string; alert: boolean }
   | { kind: "cancel" }
-  | { kind: "score"; results: JolpicaResult[]; raceControl: OpenF1RaceControl[] | null };
+  | { kind: "score"; results: JolpicaResult[]; raceControl: OpenF1RaceControl[] | null; stints: OpenF1Stint[] | null };
 
 /**
  * Decides what to do with one overdue race.
@@ -64,7 +66,7 @@ export function planRace(
   if (facts.raceControl === null && !opts.allowMissingRaceControl) {
     return wait("race-control data isn't available");
   }
-  return { kind: "score", results: facts.results, raceControl: facts.raceControl };
+  return { kind: "score", results: facts.results, raceControl: facts.raceControl, stints: facts.stints };
 }
 
 export interface PickToScore {

@@ -1,17 +1,19 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { JolpicaResult } from "@/lib/jolpica";
-import type { OpenF1RaceControl } from "@/lib/openf1";
+import type { OpenF1RaceControl, OpenF1Stint } from "@/lib/openf1";
 import { tallyRaceControl } from "@/lib/race-control";
 import { calculateRaceControlScore } from "@/lib/scoring";
 
 // Raw API responses saved 2026-11-09: OpenF1 /race_control for the race
-// session, and Jolpica /2026/{round}/results.json Results.
+// session, and Jolpica /2026/{round}/results.json Results. OpenF1 /stints for
+// the race session saved 2026-11-16.
 function fixture<T>(name: string): T {
   return JSON.parse(readFileSync(new URL(`./__fixtures__/${name}`, import.meta.url), "utf8"));
 }
 const messagesFor = (race: string) => fixture<OpenF1RaceControl[]>(`2026-${race}.openf1-race-control.json`);
 const resultsFor = (race: string) => fixture<JolpicaResult[]>(`2026-${race}.jolpica-results.json`);
+const stintsFor = (race: string) => fixture<OpenF1Stint[]>(`2026-${race}.openf1-stints.json`);
 
 function rc(category: string, message: string, flag?: string): OpenF1RaceControl {
   return { date: "2026-11-08T17:30:00+00:00", category, message, ...(flag ? { flag } : {}) };
@@ -25,13 +27,14 @@ function result(positionText: string, status: string): JolpicaResult {
 describe("tallyRaceControl on real 2026 races", () => {
   // Expected values hand-counted from the raw messages and results, not from this code.
   it.each([
-    ["canada", { redFlags: 0, safetyCars: 0, vscs: 3, penalties: 6, dnfs: 5, wet: false }, 25],
+    // Canada: 7 cars on intermediates. São Paulo: 22.
+    ["canada", { redFlags: 0, safetyCars: 0, vscs: 3, penalties: 6, dnfs: 5, wet: true }, 30],
     ["madrid", { redFlags: 0, safetyCars: 0, vscs: 1, penalties: 2, dnfs: 4, wet: false }, 13],
     ["singapore", { redFlags: 0, safetyCars: 0, vscs: 2, penalties: 0, dnfs: 4, wet: false }, 14],
     ["mexico", { redFlags: 1, safetyCars: 2, vscs: 1, penalties: 4, dnfs: 5, wet: false }, 42],
-    ["sao-paulo", { redFlags: 0, safetyCars: 0, vscs: 0, penalties: 2, dnfs: 1, wet: false }, 4],
+    ["sao-paulo", { redFlags: 0, safetyCars: 0, vscs: 0, penalties: 2, dnfs: 1, wet: true }, 9],
   ])("%s", (race, want, points) => {
-    const tally = tallyRaceControl(messagesFor(race), resultsFor(race));
+    const tally = tallyRaceControl(messagesFor(race), resultsFor(race), stintsFor(race));
 
     expect(tally).toMatchObject(want);
     expect(calculateRaceControlScore(tally)).toBe(points);
@@ -110,5 +113,21 @@ describe("tallyRaceControl rules", () => {
     );
 
     expect(tally.dnfs).toBe(2);
+  });
+
+  it("calls a race wet when any car runs intermediate or wet tyres", () => {
+    const stint = (driver_number: number, compound: string): OpenF1Stint => ({ driver_number, stint_number: 1, compound, lap_start: 1, lap_end: 20 });
+    const dry = [stint(1, "MEDIUM"), stint(16, "HARD"), stint(44, "SOFT")];
+
+    expect(tallyRaceControl([], [], dry).wet).toBe(false);
+    expect(tallyRaceControl([], [], [...dry, stint(18, "INTERMEDIATE")]).wet).toBe(true);
+    expect(tallyRaceControl([], [], [...dry, stint(18, "WET")]).wet).toBe(true);
+    expect(tallyRaceControl([], [], [...dry, stint(18, "INTERMEDIATE"), stint(18, "WET")]).details).toEqual([
+      { eventType: "wet", description: "1 car on intermediate or wet tyres" },
+    ]);
+  });
+
+  it("goes by the tyres, not by race-control messages", () => {
+    expect(tallyRaceControl([rc("Other", "RISK OF RAIN FOR F1 RACE IS 100%"), rc("Other", "WET RACE")], [], []).wet).toBe(false);
   });
 });

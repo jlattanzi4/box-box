@@ -1,5 +1,5 @@
 import type { JolpicaResult } from "@/lib/jolpica";
-import type { OpenF1RaceControl } from "@/lib/openf1";
+import type { OpenF1RaceControl, OpenF1Stint } from "@/lib/openf1";
 
 /**
  * Race Control scoring rules, matched against real 2026 race-control feeds
@@ -20,13 +20,18 @@ export interface RaceControlTally {
 // Investigations and the later "PENALTY SERVED - ..." echo don't match.
 const PENALTY_ISSUED = /^(FIA STEWARDS: )?(\d+ SECOND TIME|DRIVE THROUGH|STOP-AND-GO) PENALTY FOR CAR/;
 
+// A race is wet when any car runs intermediate or full wet tyres in it. Race
+// control never declares a wet race in OpenF1's feed (not even São Paulo 2024,
+// run in heavy rain), but the tyres always tell.
+const WET_TYRES = new Set(["INTERMEDIATE", "WET"]);
+
 export function tallyRaceControl(
   messages: OpenF1RaceControl[],
-  results: JolpicaResult[]
+  results: JolpicaResult[],
+  stints: OpenF1Stint[] = []
 ): RaceControlTally {
   const details: RaceControlTally["details"] = [];
   const record = (eventType: string, description: string) => details.push({ eventType, description });
-  let wet = false;
 
   for (const event of messages) {
     const msg = event.message.trim().toUpperCase();
@@ -40,11 +45,12 @@ export function tallyRaceControl(
       record("vsc", event.message);
     } else if (PENALTY_ISSUED.test(msg)) {
       record("penalty", event.message);
-    } else if (!wet && (msg.includes("WET RACE") || msg.includes("WET DECLARED"))) {
-      wet = true;
-      record("wet", event.message);
     }
   }
+
+  const wetCars = new Set(stints.filter((s) => WET_TYRES.has(s.compound?.toUpperCase() ?? "")).map((s) => s.driver_number));
+  const wet = wetCars.size > 0;
+  if (wet) record("wet", `${wetCars.size} ${wetCars.size === 1 ? "car" : "cars"} on intermediate or wet tyres`);
 
   // OpenF1 doesn't announce retirements, so DNFs come from the official
   // classification. Cars that never started aren't DNFs.

@@ -10,7 +10,7 @@ const RC_EVENTS: { key: keyof typeof RACE_CONTROL_POINTS; label: string; color: 
   { key: "red_flag", label: "Red flag", color: "var(--kerb-red)", note: "Race stopped" },
   { key: "safety_car", label: "Safety car", color: "var(--flag-yellow)", note: "Physical safety car deployed" },
   { key: "vsc", label: "Virtual safety car", color: "#f0b429", note: "VSC period called" },
-  { key: "wet", label: "Wet race", color: "var(--wet-blue)", note: "Declared wet by race control" },
+  { key: "wet", label: "Wet race", color: "var(--wet-blue)", note: "Any car on intermediate or wet tyres" },
   { key: "dnf", label: "Each DNF", color: "#ff7a3d", note: "Per car that retires or stops" },
   { key: "penalty", label: "Each penalty", color: "var(--chalk-dim)", note: "Per time or grid penalty" },
 ];

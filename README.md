@@ -22,7 +22,7 @@ Box Box is a private-league F1 fantasy game built for the 2026 season. Each race
 | Red Flag | 15 |
 | Safety Car | 5 |
 | Virtual Safety Car | 3 |
-| Wet Race | 5 |
+| Wet Race (any car on intermediate or wet tyres) | 5 |
 | DNF | 2 (per DNF) |
 | Penalty | 1 (per penalty) |
 
